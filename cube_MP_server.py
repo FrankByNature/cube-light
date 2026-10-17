@@ -177,6 +177,14 @@ class PlanesGame:
 
     FADE_DURATION = 1.0  # Time in seconds for a plane to fade in at the back
 
+    # Planes glide smoothly: x is a float and a plane between two slices is
+    # drawn across both, brightness split by how close it is to each.
+    COLLIDE_RANGE = 0.5  # a plane hits the dot while |x| < this (nearest slice is 0)
+
+    # The tenth plane is a scrolling rainbow
+    RAINBOW_SPREAD = 40.0   # hue degrees between neighbouring diagonals
+    RAINBOW_SCROLL = 240.0  # hue degrees per second (scrolls backwards)
+
     # Planes come in groups of 10: nine with a 2x2 hole, then one with a
     # single-pixel hole, then a short pause before the next (faster) group.
     GROUP_SIZE = 10
@@ -237,35 +245,43 @@ class PlanesGame:
         return random.choice(candidates)
 
     @staticmethod
-    def _create_plane_with_hole(hole_size, hole_pos):
-        """Create a 5x5 y-z cross section with a hole_size x hole_size hole."""
+    def _create_plane_mask(hole_size, hole_pos):
+        """(5, 5) bool mask of a y-z cross section with a hole_size x hole_size hole."""
         hole_y, hole_z = hole_pos
+        mask = np.ones((5, 5), dtype=bool)
+        mask[hole_y:hole_y + hole_size, hole_z:hole_z + hole_size] = False
+        return mask
 
-        cells = []
+    def _rainbow_colours(self, age):
+        """(5, 5, 3) rainbow across the plane's diagonals, scrolling backwards."""
+        colours = np.empty((5, 5, 3))
+        base = -self.RAINBOW_SCROLL * age
         for y in range(5):
             for z in range(5):
-                # Skip the hole_size x hole_size hole
-                if not (hole_y <= y <= hole_y + hole_size - 1 and hole_z <= z <= hole_z + hole_size - 1):
-                    cells.append((y, z))
-
-        return cells, (hole_y, hole_z)
+                colours[y, z] = hsv_to_rgb(base + (y + z) * self.RAINBOW_SPREAD, 1.0, 1.0)
+        return colours
 
     @staticmethod
     def _speed_for_score(score):
-        """Speed steps up every 10 planes survived: 100% -> 137.5% -> 175%
-        -> 212.5% -> 250% (40), then caps. Beyond 40 the spacing tightens
+        """Speed steps up every 10 planes survived: 130% -> 160% -> 190%
+        -> 220% -> 250% (40), then caps. Beyond 40 the spacing tightens
         instead (see _plane_gap_for_score)."""
-        return min(2.5, 1.0 + 0.375 * (score // 10))
+        return min(2.5, 1.3 + 0.3 * (score // 10))
 
     @staticmethod
     def _plane_gap_for_score(score):
-        """X-slice gap required between consecutive planes. Below score 40 the
-        gap is wide enough that only one plane is ever in flight. Once the
-        speed caps at 250%, the gap shrinks by one slice every further 10
-        planes (down to 1), so planes pack closer and several share the cube."""
+        """X-slice gap required between consecutive planes: a new plane can
+        start fading in once the previous one is this far forward from the
+        back. 3 slices to start, then 2 from 40 and 1 from 50 once the speed
+        has capped, so planes pack closer together."""
         if score < 40:
-            return 5  # effectively one plane at a time
-        return max(1, 4 - (score - 40) // 10)
+            return 3
+        return max(1, 3 - (score - 30) // 10)
+
+    @staticmethod
+    def _velocity(speed):
+        """Plane speed in slices per second."""
+        return speed / 0.6
 
     def _dot_in_hole(self, obj):
         """True if the player dot is lined up with this plane's hole."""
@@ -331,114 +347,99 @@ class PlanesGame:
         # Difficulty is driven entirely by planes survived (score).
         self.speed = self._speed_for_score(self.score)
 
-        # Spawn planes. Below score 40 there is one plane at a time (the
-        # gap spans the whole cube); beyond that the speed is capped and
-        # planes instead pack closer together, so several can be in flight
-        # at once. A new plane is allowed once the newest plane has moved
-        # the required x-gap forward from the back.
-        spawn_interval = max(0.4, 1.0 / self.speed)
+        # Spawn planes. A new plane may start fading in at the back once the
+        # previous one has moved `gap` slices forward, so several can be in
+        # flight at once. Each group of 10 waits for an empty cube plus a
+        # short pause before it starts.
+        spawn_interval = max(0.3, 0.6 / self.speed)
         gap = self._plane_gap_for_score(self.score)
         group, index = divmod(self.spawned, self.GROUP_SIZE)
         if index == 0 and self.spawned > 0:
-            # New group: wait for the cube to clear, then a short pause
             ready_to_spawn = (not self.planes and
                               now - self.last_spawn_time > spawn_interval + self.GROUP_PAUSE)
         elif self.planes:
-            newest_x = max(p['x'] for p in self.planes)
-            newest_moving = any(p['moving'] for p in self.planes if p['x'] == newest_x)
-            ready_to_spawn = newest_moving and newest_x <= 4 - gap
+            newest = self.planes[-1]
+            ready_to_spawn = newest['moving'] and newest['x'] <= 4 - gap
         else:
             ready_to_spawn = now - self.last_spawn_time > spawn_interval
         if ready_to_spawn:
             final = index == self.GROUP_SIZE - 1
             hole_size = 1 if final else 2
             hole_pos = self._pick_hole(hole_size, group)
-            cells, hole_pos = self._create_plane_with_hole(hole_size, hole_pos)
             # The first nine of each group step from red through the
-            # spectrum; the tenth sweeps the spectrum backwards as it flies.
+            # spectrum; the tenth is a scrolling rainbow.
             hue = index / self.GROUP_SIZE * 360.0
-            color = list(hsv_to_rgb(hue, 1.0, 1.0))
-            update_interval = max(0.12, 0.6 / self.speed)
+            colours = np.empty((5, 5, 3))
+            colours[:, :] = hsv_to_rgb(hue, 1.0, 1.0)
 
             self.planes.append({
-                'cells': cells,
+                'mask': self._create_plane_mask(hole_size, hole_pos),
                 'hole': hole_pos,
                 'hole_size': hole_size,
                 'spawn_time': now,
-                'color': color,
-                'reverse_rainbow': final,
-                # Rough fade + flight time, for the tenth plane's colour sweep
-                'lifetime': self.FADE_DURATION + 5 * update_interval,
+                'colours': colours,
+                'rainbow': final,
                 'moving': False,   # Starts moving forward after fade-in
-                'x': 4             # Back of the cube
+                'scored': False,
+                'x': 4.0           # Back of the cube
             })
             self.spawned += 1
             self.last_hole = (hole_pos, hole_size)
             self.last_spawn_time = now
 
-        # Continuous collision: while a plane occupies the player's plane
-        # (x = 0) the dot must be lined up with the hole, otherwise it is a
-        # hit. Checked every frame so moving onto the plane is also fatal.
+        # Glide the planes forward, in proportion to the time since last frame
+        dt = now - self.last_update_time
+        self.last_update_time = now
+        dx = self._velocity(self.speed) * dt
+        survived = []
         for obj in self.planes:
-            if obj['moving'] and obj['x'] == 0 and not self._dot_in_hole(obj):
+            if not obj['moving']:
+                # Begin moving once the fade-in has completed
+                if now - obj['spawn_time'] >= self.FADE_DURATION:
+                    obj['moving'] = True
+                survived.append(obj)
+                continue
+
+            obj['x'] -= dx
+
+            # Continuous collision: while the plane is nearest the player's
+            # slice (x = 0) the dot must be lined up with the hole. Checked
+            # every frame so moving onto the plane is also fatal.
+            if abs(obj['x']) < self.COLLIDE_RANGE and not self._dot_in_hole(obj):
                 self._trigger_explosion()
                 return
 
-        # Advance the plane towards the front
-        update_interval = max(0.12, 0.6 / self.speed)
-        if now - self.last_update_time > update_interval:
-            survived = []
-            consumed = False
-            for obj in self.planes:
-                # Begin moving once the fade-in has completed
-                if not obj['moving']:
-                    age = now - obj['spawn_time']
-                    if age >= self.FADE_DURATION:
-                        obj['moving'] = True
-                    else:
-                        survived.append(obj)
-                        continue
+            if not obj['scored'] and obj['x'] <= -self.COLLIDE_RANGE:
+                # Passed through the player's slice with the dot in the hole
+                # the whole time - a clean dodge, score it.
+                obj['scored'] = True
+                self.score += 1
+                self.score_value.value = self.score
 
-                # Step one slice towards the front plane
-                obj['x'] -= 1
+            if obj['x'] > -1.0:
+                survived.append(obj)
+            else:
+                self.last_spawn_time = now  # fully gone; start the gap before the next plane
+        self.planes = survived
 
-                if obj['x'] < 0:
-                    # Plane has passed through the player's plane. Reaching
-                    # here means the dot stayed in the hole the whole time
-                    # it occupied x = 0, so it is a clean dodge - score it.
-                    self.score += 1
-                    self.score_value.value = self.score
-                    consumed = True
-                    # Plane is consumed once it passes the front
-                else:
-                    survived.append(obj)
-
-            self.planes = survived
-            self.last_update_time = now
-            if consumed:
-                self.last_spawn_time = now  # start the gap before the next plane
-
-        # Render game
-        self.leds[:] = 0
-
+        # Render: each plane is spread over the two slices either side of its
+        # x, weighted by distance, so it glides rather than jumps.
+        frame = np.zeros((5, 5, 5, 3))
         for obj in self.planes:
-            if obj['reverse_rainbow']:
-                # Red at spawn, then backwards round the wheel to orange
-                t = min(1.0, (now - obj['spawn_time']) / obj['lifetime'])
-                obj['color'] = list(hsv_to_rgb((360.0 - 324.0 * t) % 360.0, 1.0, 1.0))
+            if obj['rainbow']:
+                obj['colours'] = self._rainbow_colours(now - obj['spawn_time'])
+            plane = obj['colours'] * obj['mask'][:, :, None]
             if obj['moving']:
-                x = obj['x']
-                # Render through to the player's plane (x = 0)
-                if 0 <= x < 5:
-                    for y, z in obj['cells']:
-                        self.leds[x, y, z] = obj['color']
+                lower = int(np.floor(obj['x']))
+                frac = obj['x'] - lower
+                slices = ((lower, 1.0 - frac), (lower + 1, frac))
             else:
                 # Fading in at the back (x = 4)
-                age = now - obj['spawn_time']
-                fade = min(1.0, age / self.FADE_DURATION)
-                faded_color = [int(c * fade) for c in obj['color']]
-                for y, z in obj['cells']:
-                    self.leds[4, y, z] = faded_color
+                slices = ((4, min(1.0, (now - obj['spawn_time']) / self.FADE_DURATION)),)
+            for sx, weight in slices:
+                if 0 <= sx < 5 and weight > 0:
+                    np.maximum(frame[sx], plane * weight, out=frame[sx])
+        self.leds[:] = frame.astype(self.leds.dtype)
 
         # Draw the player dot in the front plane, last so it stays visible
         self.leds[0, self.player_y, self.player_z] = self.player_color
