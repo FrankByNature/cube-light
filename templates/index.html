@@ -1,0 +1,1519 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>5x5x5 LED Cube Controller</title>
+    <style>
+        body { font-family: Arial, sans-serif; max-width: 400px; margin: 20px auto; padding: 20px; background: #1a1a1a; color: #fff; }
+        h1 { text-align: center; margin-bottom: 10px; }
+        .subtitle { text-align: center; color: #888; margin-bottom: 10px; font-size: 14px; }
+        .multicore { text-align: center; color: #4CAF50; margin-bottom: 30px; font-size: 12px; }
+
+        /* Tab Navigation */
+        .tabs { display: flex; gap: 5px; margin-bottom: 20px; background: #2a2a2a; border-radius: 10px; padding: 5px; }
+        .tab-button { flex: 1; padding: 12px; border: none; background: transparent; color: #888; cursor: pointer; border-radius: 5px; transition: all 0.3s; font-size: 14px; }
+        .tab-button:hover { background: #333; color: #fff; }
+        .tab-button.active { background: #4CAF50; color: white; }
+
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+
+        .control-group { margin: 25px 0; padding: 20px; background: #2a2a2a; border-radius: 10px; }
+        label { display: block; margin-bottom: 10px; font-weight: bold; }
+        input[type="color"] { width: 100%; height: 60px; border: none; border-radius: 5px; cursor: pointer; }
+        input[type="range"] { width: 100%; height: 40px; cursor: pointer; }
+        .value-display { text-align: center; font-size: 24px; margin-top: 10px; color: #4CAF50; }
+        .pattern-buttons { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 15px; }
+        button { padding: 15px; border: none; border-radius: 5px; font-size: 16px; cursor: pointer; background: #4CAF50; color: white; transition: background 0.3s; }
+        button:hover { background: #45a049; }
+        .off-button { background: #f44336; }
+        .off-button:hover { background: #da190b; }
+        .pattern-button { background: #2196F3; }
+        .pattern-button:hover { background: #0b7dda; }
+        .pattern-button.active { background: #ff9800; }
+        .mode-toggle { display: flex; gap: 10px; margin-bottom: 20px; }
+        .mode-toggle button { flex: 1; }
+        .status { text-align: center; margin-top: 20px; padding: 10px; background: #333; border-radius: 5px; font-size: 12px; color: #888; }
+        .wave-controls { display: none; margin-top: 15px; padding: 15px; background: #333; border-radius: 5px; }
+        .wave-controls.active { display: block; }
+        .wave-mode-toggle { display: flex; gap: 10px; margin-bottom: 15px; }
+        .wave-mode-toggle button { flex: 1; padding: 10px; }
+        .wave-mode-toggle button.active { background: #ff9800; }
+        .slider-group { margin-top: 15px; }
+        .slider-label { display: flex; justify-content: space-between; margin-bottom: 5px; }
+        .rainbow-sliders { display: none; }
+        .rainbow-sliders.active { display: block; }
+        .rainbow-controls { display: none; margin-top: 15px; padding: 15px; background: #333; border-radius: 5px; }
+        .rainbow-controls.active { display: block; }
+        .rain-controls { display: none; margin-top: 15px; padding: 15px; background: #333; border-radius: 5px; }
+        .rain-controls.active { display: block; }
+        .drips-controls { display: none; margin-top: 15px; padding: 15px; background: #333; border-radius: 5px; }
+        .drips-controls.active { display: block; }
+        .fireworks-controls { display: none; margin-top: 15px; padding: 15px; background: #333; border-radius: 5px; }
+        .fireworks-controls.active { display: block; }
+        .xms-controls { display: none; margin-top: 15px; padding: 15px; background: #333; border-radius: 5px; }
+        .xms-controls.active { display: block; }
+        .flame-controls { display: none; margin-top: 15px; padding: 15px; background: #333; border-radius: 5px; }
+        .flame-controls.active { display: block; }
+        .lava-controls { display: none; margin-top: 15px; padding: 15px; background: #333; border-radius: 5px; }
+        .lava-controls.active { display: block; }
+        .ocean-controls { display: none; margin-top: 15px; padding: 15px; background: #333; border-radius: 5px; }
+        .ocean-controls.active { display: block; }
+        .spiral-controls { display: none; margin-top: 15px; padding: 15px; background: #333; border-radius: 5px; }
+        .spiral-controls.active { display: block; }
+        .shimmer-controls { display: none; margin-top: 15px; padding: 15px; background: #333; border-radius: 5px; }
+        .shimmer-controls.active { display: block; }
+        .reset-btn { background: #555; color: #ccc; font-size: 13px; padding: 8px 14px; margin-top: 12px; width: 100%; }
+        .reset-btn:hover { background: #777; color: #fff; }
+
+        /* Game Styles */
+        .game-controls { display: grid; gap: 15px; }
+        .direction-pad { display: grid; grid-template-columns: 1fr 1fr 1fr; grid-template-rows: 1fr 1fr 1fr; gap: 10px; max-width: 250px; margin: 20px auto; }
+        .direction-btn { padding: 20px; font-size: 20px; background: #2196F3; border: none; border-radius: 10px; cursor: pointer; color: white; transition: all 0.2s; }
+        .direction-btn:hover { background: #0b7dda; transform: scale(1.05); }
+        .direction-btn:active { transform: scale(0.95); }
+        .direction-btn.up { grid-column: 2; grid-row: 1; }
+        .direction-btn.down { grid-column: 2; grid-row: 3; }
+        .direction-btn.left { grid-column: 1; grid-row: 2; }
+        .direction-btn.right { grid-column: 3; grid-row: 2; }
+        .z-pad { display: flex; gap: 10px; max-width: 250px; margin: 0 auto 10px; }
+        .z-pad .direction-btn { flex: 1; }
+        .game-info { text-align: center; margin: 20px 0; padding: 15px; background: #333; border-radius: 10px; }
+        .game-info .score { font-size: 32px; color: #4CAF50; font-weight: bold; }
+        .game-info .label { font-size: 14px; color: #888; margin-bottom: 5px; }
+        .game-status { font-size: 18px; color: #ff9800; margin-top: 10px; }
+        .game-over { color: #f44336 !important; font-size: 24px; font-weight: bold; animation: blink 1s infinite; }
+        .game-won { color: #4CAF50 !important; font-size: 24px; font-weight: bold; animation: blink 1s infinite; }
+        @keyframes blink { 0%, 50% { opacity: 1; } 51%, 100% { opacity: 0.3; } }
+        .game-start-btn { background: #4CAF50; font-size: 18px; padding: 20px; }
+        .game-start-btn:hover { background: #45a049; }
+        .game-stop-btn { background: #f44336; }
+        .game-stop-btn:hover { background: #da190b; }
+    </style>
+</head>
+<body>
+    <!-- Tab Navigation -->
+    <div class="tabs">
+        <button class="tab-button active" onclick="switchTab('control')">Control</button>
+        <button class="tab-button" onclick="switchTab('patterns')">Patterns</button>
+        <button class="tab-button" onclick="switchTab('games')">Games</button>
+    </div>
+
+    <!-- Control Tab -->
+    <div id="control-tab" class="tab-content active">
+        <div class="control-group">
+            <label for="brightness">Brightness</label>
+            <input type="range" id="brightness" min="0" max="100" value="{{ initial_brightness }}" oninput="updateBrightness(this.value)">
+            <div class="value-display"><span id="brightnessValue">{{ initial_brightness }}</span>%</div>
+        </div>
+
+        <div class="control-group">
+            <label>Quick Colours</label>
+            <div class="pattern-buttons">
+                <button onclick="setColor('#FF0000')">Red</button>
+                <button onclick="setColor('#00FF00')">Green</button>
+                <button onclick="setColor('#0000FF')">Blue</button>
+                <button onclick="setColor('#FFFF00')">Yellow</button>
+                <button onclick="setColor('#FF00FF')">Magenta</button>
+                <button onclick="setColor('#00FFFF')">Cyan</button>
+                <button onclick="setColor('#FFFFFF')">White</button>
+                <button class="off-button" onclick="turnOff()">OFF</button>
+            </div>
+        </div>
+
+        <div class="control-group">
+            <label for="colorPicker">Colour Selector</label>
+            <input type="color" id="colorPicker" value="#ffffff" onchange="fillCube(this.value)">
+        </div>
+
+        <div class="control-group">
+            <label>Raspberry Pi</label>
+            <div class="pattern-buttons">
+                <button class="off-button" onclick="shutdownPi()">Shut Down Pi</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Patterns Tab -->
+    <div id="patterns-tab" class="tab-content">
+        <div class="control-group">
+            <label for="patternBrightness">Brightness</label>
+            <input type="range" id="patternBrightness" min="0" max="100" value="{{ initial_brightness }}" oninput="updatePatternBrightness(this.value)">
+            <div class="value-display"><span id="patternBrightnessValue">{{ initial_brightness }}</span>%</div>
+        </div>
+
+        <div class="control-group">
+            <label>Select Pattern</label>
+            <div class="pattern-buttons">
+                <button class="pattern-button" onclick="startPattern('rainbow', this)">🌈 Rainbow</button>
+                <button class="pattern-button" onclick="startPattern('fireworks', this)">🎆 Fireworks</button>
+                <button class="pattern-button" onclick="startPattern('wave', this)">🌊 Wave</button>
+                <button class="pattern-button" onclick="startPattern('rain', this)">🌧️ Rain</button>
+                <button class="pattern-button" onclick="startPattern('flame', this)">🔥 Flame</button>
+                <button class="pattern-button" onclick="startPattern('XMS', this)">💥 Explosions</button>
+                <button class="pattern-button" onclick="startPattern('drips', this)">💧 Drips</button>
+                <button class="pattern-button" onclick="startPattern('lava', this)">🌋 Lava Lamp</button>
+                <button class="pattern-button" onclick="startPattern('ocean', this)">🫧 Ocean</button>
+                <button class="pattern-button" onclick="startPattern('spiral', this)">🌀 Spiral</button>
+                <button class="pattern-button" onclick="startPattern('shimmer', this)">✨ Shimmer</button>
+                <button class="off-button" onclick="stopPattern()">⏹️ Stop</button>
+            </div>
+
+            <div id="waveControls" class="wave-controls">
+                <label>🌊 Wave Settings</label>
+                <div class="wave-mode-toggle">
+                    <button id="zAxisBtn" class="active" onclick="setWaveAxis('z')">Z-axis</button>
+                    <button id="xAxisBtn" onclick="setWaveAxis('x')">X-axis</button>
+                </div>
+                <div class="wave-mode-toggle">
+                    <button id="rainbowModeBtn" class="active" onclick="setWaveMode('rainbow')">Rainbow</button>
+                    <button id="solidModeBtn" onclick="setWaveMode('solid')">Solid Color</button>
+                </div>
+                <div class="slider-group">
+                    <div class="slider-label">
+                        <label>Wave Speed</label>
+                        <span id="waveSpeedValue">3</span>
+                    </div>
+                    <input type="range" id="waveSpeed" min="1" max="10" value="3" oninput="setWaveSpeed(this.value)">
+                </div>
+                <div id="waveColorPicker" style="display: none;">
+                    <label for="waveColor">Wave Color</label>
+                    <input type="color" id="waveColor" value="#00FFFF" onchange="setWaveColor(this.value)">
+                </div>
+                <div id="waveRainbowSliders" class="rainbow-sliders active">
+                    <div class="slider-group">
+                        <div class="slider-label">
+                            <label>Rainbow Speed</label>
+                            <span id="waveRainbowSpeedValue">5</span>
+                        </div>
+                        <input type="range" id="waveRainbowSpeed" min="1" max="20" value="5" oninput="setWaveRainbowSpeed(this.value)">
+                    </div>
+                    <div class="slider-group">
+                        <div class="slider-label">
+                            <label>Rainbow Spread</label>
+                            <span id="waveRainbowSpreadValue">60</span>
+                        </div>
+                        <input type="range" id="waveRainbowSpread" min="10" max="120" value="60" oninput="setWaveRainbowSpread(this.value)">
+                    </div>
+                </div>
+                <button class="reset-btn" onclick="resetWave()">↺ Reset to Defaults</button>
+            </div>
+
+            <div id="rainControls" class="rain-controls">
+                <label>🌧️ Rain Settings</label>
+                <div class="slider-group">
+                    <div class="slider-label">
+                        <label>Intensity</label>
+                        <span id="rainIntensityValue">5</span>
+                    </div>
+                    <input type="range" id="rainIntensity" min="1" max="10" value="5" oninput="setRainIntensity(this.value)">
+                </div>
+                <button class="reset-btn" onclick="resetRain()">↺ Reset to Defaults</button>
+            </div>
+
+            <div id="dripsControls" class="drips-controls">
+                <label>💧 Drips Settings</label>
+                <div class="slider-group">
+                    <div class="slider-label">
+                        <label>Spawn Rate</label>
+                        <span id="dripsSpawnValue">5</span>
+                    </div>
+                    <input type="range" id="dripsSpawn" min="1" max="10" value="5" oninput="setDripsSpawn(this.value)">
+                </div>
+                <button class="reset-btn" onclick="resetDrips()">↺ Reset to Defaults</button>
+            </div>
+
+            <div id="fireworksControls" class="fireworks-controls">
+                <label>🎆 Fireworks Settings</label>
+                <div class="slider-group">
+                    <div class="slider-label">
+                        <label>Max Fireworks</label>
+                        <span id="fireworksMaxValue">1</span>
+                    </div>
+                    <input type="range" id="fireworksMax" min="1" max="5" value="1" oninput="setFireworksMax(this.value)">
+                </div>
+                <div class="slider-group">
+                    <div class="slider-label">
+                        <label>Launch Rate</label>
+                        <span id="fireworksLaunchValue">4</span>
+                    </div>
+                    <input type="range" id="fireworksLaunch" min="1" max="10" value="4" oninput="setFireworksLaunch(this.value)">
+                </div>
+                <div class="slider-group">
+                    <div class="slider-label">
+                        <label>Explosion Size</label>
+                        <span id="fireworksSizeValue">5</span>
+                    </div>
+                    <input type="range" id="fireworksSize" min="1" max="10" value="5" oninput="setFireworksSize(this.value)">
+                </div>
+                <button class="reset-btn" onclick="resetFireworks()">↺ Reset to Defaults</button>
+            </div>
+
+            <div id="rainbowControls" class="rainbow-controls">
+                <label>🌈 Rainbow Settings</label>
+                <div class="slider-group">
+                    <div class="slider-label">
+                        <label>Rainbow Speed</label>
+                        <span id="rainbowSpeedValue">5</span>
+                    </div>
+                    <input type="range" id="rainbowSpeed" min="1" max="20" value="5" oninput="setRainbowSpeed(this.value)">
+                </div>
+                <div class="slider-group">
+                    <div class="slider-label">
+                        <label>Colour Spread</label>
+                        <span id="rainbowSpreadValue">60</span>
+                    </div>
+                    <input type="range" id="rainbowSpread" min="10" max="120" value="60" oninput="setRainbowSpread(this.value)">
+                </div>
+                <button class="reset-btn" onclick="resetRainbow()">↺ Reset to Defaults</button>
+            </div>
+
+            <div id="xmsControls" class="xms-controls">
+                <label>💥 Explosions Settings</label>
+                <div class="slider-group">
+                    <div class="slider-label">
+                        <label>Excitation Threshold</label>
+                        <span id="xmsThresholdValue">5</span>
+                    </div>
+                    <input type="range" id="xmsThreshold" min="1" max="20" value="5" step="1" oninput="setXmsThreshold(this.value)">
+                </div>
+                <div class="slider-group">
+                    <div class="slider-label">
+                        <label>Refractory Period</label>
+                        <span id="xmsRefractoryValue">6</span>
+                    </div>
+                    <input type="range" id="xmsRefractory" min="1" max="20" value="6" step="1" oninput="setXmsRefractory(this.value)">
+                </div>
+                <div class="slider-group">
+                    <div class="slider-label">
+                        <label>Trigger Probability</label>
+                        <span id="xmsTriggerValue">0.003</span>
+                    </div>
+                    <input type="range" id="xmsTrigger" min="1" max="100" value="3" step="1" oninput="setXmsTrigger(this.value)">
+                </div>
+                <button class="reset-btn" onclick="resetXms()">↺ Reset to Defaults</button>
+            </div>
+
+            <div id="flameControls" class="flame-controls">
+                <label>🔥 Flame Settings</label>
+                <div class="slider-group">
+                    <div class="slider-label">
+                        <label>Intensity</label>
+                        <span id="flameBaseTempValue">0.50</span>
+                    </div>
+                    <input type="range" id="flameBaseTemp" min="10" max="100" value="50" step="1" oninput="setFlameBaseTemp(this.value)">
+                </div>
+                <div class="slider-group">
+                    <div class="slider-label">
+                        <label>Randomness</label>
+                        <span id="flameVarTempValue">0.50</span>
+                    </div>
+                    <input type="range" id="flameVarTemp" min="0" max="100" value="50" step="1" oninput="setFlameVarTemp(this.value)">
+                </div>
+                <button class="reset-btn" onclick="resetFlame()">↺ Reset to Defaults</button>
+            </div>
+
+            <div id="lavaControls" class="lava-controls">
+                <label>🌋 Lava Lamp Settings</label>
+                <div class="wave-mode-toggle">
+                    <button id="lavaSolidBtn" class="active" onclick="setLavaMode('solid')">Solid</button>
+                    <button id="lavaMultiBtn" onclick="setLavaMode('multi')">Multi</button>
+                    <button id="lavaRainbowBtn" onclick="setLavaMode('rainbow')">Rainbow</button>
+                </div>
+                <div id="lavaColorPicker">
+                    <label for="lavaColor">Blob Colour</label>
+                    <input type="color" id="lavaColor" value="#FF2800" onchange="setLavaColor(this.value)">
+                </div>
+                <div class="slider-group">
+                    <div class="slider-label">
+                        <label>Number of Blobs</label>
+                        <span id="lavaCountValue">3</span>
+                    </div>
+                    <input type="range" id="lavaCount" min="1" max="6" value="3" oninput="setLavaCount(this.value)">
+                </div>
+                <div class="slider-group">
+                    <div class="slider-label">
+                        <label>Blob Size</label>
+                        <span id="lavaSizeValue">5</span>
+                    </div>
+                    <input type="range" id="lavaSize" min="1" max="10" value="5" oninput="setLavaSize(this.value)">
+                </div>
+                <div class="slider-group">
+                    <div class="slider-label">
+                        <label>Drift Speed</label>
+                        <span id="lavaSpeedValue">5</span>
+                    </div>
+                    <input type="range" id="lavaSpeed" min="1" max="20" value="5" oninput="setLavaSpeed(this.value)">
+                </div>
+                <button class="reset-btn" onclick="resetLava()">↺ Reset to Defaults</button>
+            </div>
+
+            <div id="oceanControls" class="ocean-controls">
+                <label>🫧 Ocean Settings</label>
+                <div class="slider-group">
+                    <div class="slider-label">
+                        <label>Wave Speed</label>
+                        <span id="oceanSpeedValue">5</span>
+                    </div>
+                    <input type="range" id="oceanSpeed" min="1" max="10" value="5" oninput="setOceanSpeed(this.value)">
+                </div>
+                <div class="slider-group">
+                    <div class="slider-label">
+                        <label>Wave Height</label>
+                        <span id="oceanHeightValue">5</span>
+                    </div>
+                    <input type="range" id="oceanHeight" min="1" max="10" value="5" oninput="setOceanHeight(this.value)">
+                </div>
+                <button class="reset-btn" onclick="resetOcean()">↺ Reset to Defaults</button>
+            </div>
+
+            <div id="spiralControls" class="spiral-controls">
+                <label>🌀 Spiral Settings</label>
+                <div class="wave-mode-toggle">
+                    <button id="spiralRainbowBtn" class="active" onclick="setSpiralMode('rainbow')">Rainbow</button>
+                    <button id="spiralSolidBtn" onclick="setSpiralMode('solid')">Solid Colour</button>
+                </div>
+                <div id="spiralColorPicker" style="display: none;">
+                    <label for="spiralColor">Spiral Colour</label>
+                    <input type="color" id="spiralColor" value="#0080FF" onchange="setSpiralColor(this.value)">
+                </div>
+                <div class="slider-group">
+                    <div class="slider-label">
+                        <label>Radius</label>
+                        <span id="spiralRadiusValue">2.0</span>
+                    </div>
+                    <input type="range" id="spiralRadius" min="5" max="20" value="20" step="1" oninput="setSpiralRadius(this.value)">
+                </div>
+                <div class="slider-group">
+                    <div class="slider-label">
+                        <label>Rotation Speed</label>
+                        <span id="spiralSpeedValue">5</span>
+                    </div>
+                    <input type="range" id="spiralSpeed" min="1" max="10" value="5" oninput="setSpiralSpeed(this.value)">
+                </div>
+                <div class="slider-group">
+                    <div class="slider-label">
+                        <label>Fall Speed</label>
+                        <span id="spiralFallValue">5</span>
+                    </div>
+                    <input type="range" id="spiralFall" min="1" max="10" value="5" oninput="setSpiralFall(this.value)">
+                </div>
+                <div id="spiralRainbowSliders" class="rainbow-sliders active">
+                    <div class="slider-group">
+                        <div class="slider-label">
+                            <label>Colour Speed</label>
+                            <span id="spiralColorSpeedValue">5</span>
+                        </div>
+                        <input type="range" id="spiralColorSpeed" min="1" max="10" value="5" oninput="setSpiralColorSpeed(this.value)">
+                    </div>
+                </div>
+                <button class="reset-btn" onclick="resetSpiral()">↺ Reset to Defaults</button>
+            </div>
+
+            <div id="shimmerControls" class="shimmer-controls">
+                <label>✨ Shimmer Settings</label>
+                <div>
+                    <label for="shimmerColor">Main Colour</label>
+                    <input type="color" id="shimmerColor" value="#0050C8" onchange="setShimmerColor(this.value)">
+                </div>
+                <div style="margin-top: 15px;">
+                    <label for="shimmerColor2">Shimmer Colour</label>
+                    <input type="color" id="shimmerColor2" value="#FFFFFF" onchange="setShimmerColor2(this.value)">
+                </div>
+                <div class="slider-group">
+                    <div class="slider-label">
+                        <label>Shimmer Intensity</label>
+                        <span id="shimmerIntensityValue">5</span>
+                    </div>
+                    <input type="range" id="shimmerIntensity" min="1" max="10" value="5" oninput="setShimmerIntensity(this.value)">
+                </div>
+                <button class="reset-btn" onclick="resetShimmer()">↺ Reset to Defaults</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Games Tab -->
+    <div id="games-tab" class="tab-content">
+        <!-- Game selector -->
+        <div class="mode-toggle">
+            <button id="planesGameBtn" class="active" onclick="selectGame('planes')">🚀 Space Planes</button>
+            <button id="snakeGameBtn" onclick="selectGame('snake')">🐍 3D Snake</button>
+            <button id="meteorsGameBtn" onclick="selectGame('meteors')">☄️ Meteors</button>
+        </div>
+
+        <!-- Space Planes -->
+        <div id="planesGame" class="control-group">
+            <h2 style="margin-top: 0; text-align: center;">🚀 Space Planes</h2>
+            <p style="text-align: center; color: #888; font-size: 14px;">Planes fly in from the back — line your dot up with each hole to survive.</p>
+
+            <div class="mode-toggle">
+                <button class="game-start-btn" onclick="startGame()">▶️ Start Game</button>
+                <button class="game-stop-btn" onclick="stopGame()">⏹️ Stop</button>
+            </div>
+
+            <div class="game-info">
+                <div class="label">Score</div>
+                <div class="score" id="gameScore">0</div>
+                <div class="label">High Score: <span id="gameHighScore">0</span></div>
+                <div class="game-status" id="gameStatus">Press Start to Play</div>
+            </div>
+
+            <div class="direction-pad">
+                <button class="direction-btn up" onclick="movePlayer('up')">▲</button>
+                <button class="direction-btn left" onclick="movePlayer('left')">◀</button>
+                <button class="direction-btn right" onclick="movePlayer('right')">▶</button>
+                <button class="direction-btn down" onclick="movePlayer('down')">▼</button>
+            </div>
+
+            <div style="margin-top: 20px; padding: 15px; background: #333; border-radius: 10px; font-size: 12px; color: #888;">
+                <strong>How to Play:</strong><br>
+                • Steer the green dot around the front plane (◀ ▶ left/right, ▲ ▼ up/down)<br>
+                • Planes fade in at the back, then fly forward through all 5 planes<br>
+                • Each plane has a hole — line your dot up with it<br>
+                • Planes come in groups of 10: nine with a 2×2 hole, then a rainbow plane with a single-pixel hole<br>
+                • Each new group is faster, and the holes can jump further from the last one<br>
+                • Get hit and your dot goes out in a firework
+            </div>
+        </div>
+
+        <!-- 3D Snake -->
+        <div id="snakeGame" class="control-group" style="display: none;">
+            <h2 style="margin-top: 0; text-align: center;">🐍 3D Snake</h2>
+            <p style="text-align: center; color: #888; font-size: 14px;">Steer the snake through the cube. Eat the red food, avoid yourself. Edges wrap around.</p>
+
+            <div class="mode-toggle">
+                <button class="game-start-btn" onclick="startSnake()">▶️ Start Game</button>
+                <button class="game-stop-btn" onclick="stopSnake()">⏹️ Stop</button>
+            </div>
+
+            <div class="game-info">
+                <div class="label">Score</div>
+                <div class="score" id="snakeScore">0</div>
+                <div class="label">High Score: <span id="snakeHighScore">0</span></div>
+                <div class="game-status" id="snakeStatus">Press Start to Play</div>
+            </div>
+
+            <!-- X/Y movement pad -->
+            <div class="direction-pad">
+                <button class="direction-btn up" onclick="moveSnake('py')">Y+</button>
+                <button class="direction-btn left" onclick="moveSnake('nx')">X−</button>
+                <button class="direction-btn right" onclick="moveSnake('px')">X+</button>
+                <button class="direction-btn down" onclick="moveSnake('ny')">Y−</button>
+            </div>
+
+            <!-- Z (height) movement -->
+            <div class="z-pad">
+                <button class="direction-btn" onclick="moveSnake('pz')">Z+ ⬆</button>
+                <button class="direction-btn" onclick="moveSnake('nz')">Z− ⬇</button>
+            </div>
+
+            <div style="margin-top: 20px; padding: 15px; background: #333; border-radius: 10px; font-size: 12px; color: #888;">
+                <strong>How to Play:</strong><br>
+                • Move with the pad or keys: <strong>W/A/S/D</strong> for X/Y, <strong>I/J</strong> for Z up/down<br>
+                • Eat the red food to grow and score — the snake fades from green at the head to orange at the tail<br>
+                • The cube wraps: leaving one face re-enters the opposite face<br>
+                • Game ends if the snake runs into its own body<br>
+                • Fill the entire cube to <strong>win</strong>!
+            </div>
+        </div>
+
+        <!-- Meteors -->
+        <div id="meteorsGame" class="control-group" style="display: none;">
+            <h2 style="margin-top: 0; text-align: center;">☄️ Meteors</h2>
+            <p style="text-align: center; color: #888; font-size: 14px;">Meteors glow at the top, then fall. Shoot them down before they hit the bottom.</p>
+
+            <div class="mode-toggle">
+                <button class="game-start-btn" onclick="startMeteors()">▶️ Start Game</button>
+                <button class="game-stop-btn" onclick="stopMeteors()">⏹️ Stop</button>
+            </div>
+
+            <div class="game-info">
+                <div class="label">Score</div>
+                <div class="score" id="meteorsScore">0</div>
+                <div class="label">High Score: <span id="meteorsHighScore">0</span></div>
+                <div class="game-status" id="meteorsStatus">Press Start to Play</div>
+            </div>
+
+            <div class="direction-pad">
+                <button class="direction-btn up" onclick="moveMeteors('up')">▲</button>
+                <button class="direction-btn left" onclick="moveMeteors('left')">◀</button>
+                <button class="direction-btn right" onclick="moveMeteors('right')">▶</button>
+                <button class="direction-btn down" onclick="moveMeteors('down')">▼</button>
+            </div>
+            <div class="z-pad">
+                <button class="direction-btn" style="background: #4CAF50;" onclick="moveMeteors('fire')">🔫 Fire</button>
+            </div>
+
+            <div style="margin-top: 20px; padding: 15px; background: #333; border-radius: 10px; font-size: 12px; color: #888;">
+                <strong>How to Play:</strong><br>
+                • Move the blue dot around the bottom plane with the <strong>arrow keys</strong> or <strong>W/A/S/D</strong><br>
+                • Press <strong>Space</strong> to fire a green shot straight up<br>
+                • Meteors brighten in the top plane, then fall — hit one to blow it up<br>
+                • If a meteor reaches the bottom, it's game over<br>
+                • Meteors arrive faster the longer you survive
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let currentPattern = null;
+        let gameActive = false;
+        let gameLaunched = false;   // true from start until explicit stop (survives game-over)
+        let gameScoreValue = 0;
+        let gameUpdateInterval = null;
+        let currentGame = 'planes';
+        let snakeActive = false;
+        let snakeLaunched = false;  // true from start until explicit stop (survives game-over)
+        let snakeUpdateInterval = null;
+        let meteorsActive = false;
+        let meteorsLaunched = false;  // true from start until explicit stop (survives game-over)
+        let meteorsUpdateInterval = null;
+
+        // Tab switching
+        function switchTab(tabName) {
+            // Hide all tabs
+            document.querySelectorAll('.tab-content').forEach(tab => {
+                tab.classList.remove('active');
+            });
+            document.querySelectorAll('.tab-button').forEach(btn => {
+                btn.classList.remove('active');
+            });
+
+            // Show selected tab
+            document.getElementById(tabName + '-tab').classList.add('active');
+            event.target.classList.add('active');
+
+            // Stop patterns and games when switching tabs
+            if (tabName !== 'patterns' && currentPattern) {
+                stopPattern();
+            }
+            if (tabName !== 'games') {
+                if (gameActive || gameLaunched) stopGame();
+                if (snakeActive || snakeLaunched) stopSnake();
+                if (meteorsActive || meteorsLaunched) stopMeteors();
+            }
+        }
+
+        // Switch between the games; stop whichever is currently running
+        function selectGame(name) {
+            if (name === currentGame) return;
+            if (gameActive || gameLaunched) stopGame();
+            if (snakeActive || snakeLaunched) stopSnake();
+            if (meteorsActive || meteorsLaunched) stopMeteors();
+            currentGame = name;
+
+            document.getElementById('planesGameBtn').classList.toggle('active', name === 'planes');
+            document.getElementById('snakeGameBtn').classList.toggle('active', name === 'snake');
+            document.getElementById('meteorsGameBtn').classList.toggle('active', name === 'meteors');
+            document.getElementById('planesGame').style.display = (name === 'planes') ? 'block' : 'none';
+            document.getElementById('snakeGame').style.display = (name === 'snake') ? 'block' : 'none';
+            document.getElementById('meteorsGame').style.display = (name === 'meteors') ? 'block' : 'none';
+        }
+
+        // Brightness control - keeps both tab sliders (Control + Patterns) in sync
+        function updateBrightness(value) {
+            document.getElementById('brightnessValue').textContent = value;
+            document.getElementById('patternBrightnessValue').textContent = value;
+            document.getElementById('brightness').value = value;
+            document.getElementById('patternBrightness').value = value;
+            fetch('/cube/brightness', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({brightness: parseInt(value)})
+            });
+        }
+
+        // Pattern tab's slider just defers to the shared handler above
+        function updatePatternBrightness(value) {
+            updateBrightness(value);
+        }
+
+        // Color fill
+        function fillCube(color) {
+            const r = parseInt(color.substr(1,2), 16);
+            const g = parseInt(color.substr(3,2), 16);
+            const b = parseInt(color.substr(5,2), 16);
+
+            fetch('/cube/fill', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({red: r, green: g, blue: b})
+            });
+        }
+
+        // Quick color selection
+        function setColor(hex) {
+            document.getElementById('colorPicker').value = hex;
+            fillCube(hex);
+        }
+
+        // Turn off
+        function turnOff() {
+            fetch('/cube/off', {method: 'POST'});
+            if (currentPattern) {
+                document.querySelectorAll('.pattern-button').forEach(btn => {
+                    btn.classList.remove('active');
+                });
+                currentPattern = null;
+            }
+        }
+
+        // Shut down the Raspberry Pi itself (not just the cube)
+        function shutdownPi() {
+            if (!confirm('Shut down the Raspberry Pi? You will need to power-cycle it to use the cube again.')) {
+                return;
+            }
+            fetch('/system/shutdown', {method: 'POST'});
+            alert('Shutting down. Wait ~30 seconds before disconnecting power.');
+        }
+
+        // Pattern controls
+        function startPattern(patternName, buttonElement) {
+            // Visual feedback
+            document.querySelectorAll('.pattern-button').forEach(btn => {
+                btn.classList.remove('active');
+            });
+            if (buttonElement) {
+                buttonElement.classList.add('active');
+            }
+            currentPattern = patternName;
+
+            // Hide all pattern controls
+            document.getElementById('waveControls').classList.remove('active');
+            document.getElementById('rainControls').classList.remove('active');
+            document.getElementById('dripsControls').classList.remove('active');
+            document.getElementById('fireworksControls').classList.remove('active');
+            document.getElementById('rainbowControls').classList.remove('active');
+            document.getElementById('xmsControls').classList.remove('active');
+            document.getElementById('flameControls').classList.remove('active');
+            document.getElementById('lavaControls').classList.remove('active');
+            document.getElementById('oceanControls').classList.remove('active');
+            document.getElementById('spiralControls').classList.remove('active');
+            document.getElementById('shimmerControls').classList.remove('active');
+
+            // Show relevant controls
+            if (patternName === 'wave') {
+                document.getElementById('waveControls').classList.add('active');
+            } else if (patternName === 'rain') {
+                document.getElementById('rainControls').classList.add('active');
+            } else if (patternName === 'drips') {
+                document.getElementById('dripsControls').classList.add('active');
+            } else if (patternName === 'fireworks') {
+                document.getElementById('fireworksControls').classList.add('active');
+            } else if (patternName === 'rainbow') {
+                document.getElementById('rainbowControls').classList.add('active');
+            } else if (patternName === 'XMS') {
+                document.getElementById('xmsControls').classList.add('active');
+            } else if (patternName === 'flame') {
+                document.getElementById('flameControls').classList.add('active');
+            } else if (patternName === 'lava') {
+                document.getElementById('lavaControls').classList.add('active');
+            } else if (patternName === 'ocean') {
+                document.getElementById('oceanControls').classList.add('active');
+            } else if (patternName === 'spiral') {
+                document.getElementById('spiralControls').classList.add('active');
+            } else if (patternName === 'shimmer') {
+                document.getElementById('shimmerControls').classList.add('active');
+            }
+
+            fetch('/pattern/start', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({pattern: patternName})
+            });
+        }
+
+        function stopPattern() {
+            fetch('/pattern/stop', {method: 'POST'});
+            document.querySelectorAll('.pattern-button').forEach(btn => {
+                btn.classList.remove('active');
+            });
+            document.getElementById('waveControls').classList.remove('active');
+            document.getElementById('rainControls').classList.remove('active');
+            document.getElementById('dripsControls').classList.remove('active');
+            document.getElementById('fireworksControls').classList.remove('active');
+            document.getElementById('rainbowControls').classList.remove('active');
+            document.getElementById('xmsControls').classList.remove('active');
+            document.getElementById('flameControls').classList.remove('active');
+            document.getElementById('lavaControls').classList.remove('active');
+            document.getElementById('oceanControls').classList.remove('active');
+            document.getElementById('spiralControls').classList.remove('active');
+            document.getElementById('shimmerControls').classList.remove('active');
+            currentPattern = null;
+        }
+
+        // Wave pattern controls
+        function setWaveAxis(axis) {
+            document.getElementById('zAxisBtn').classList.remove('active');
+            document.getElementById('xAxisBtn').classList.remove('active');
+            document.getElementById(axis === 'x' ? 'xAxisBtn' : 'zAxisBtn').classList.add('active');
+
+            fetch('/wave/axis', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({axis: axis})
+            });
+        }
+
+        function setWaveMode(mode) {
+            document.getElementById('solidModeBtn').classList.remove('active');
+            document.getElementById('rainbowModeBtn').classList.remove('active');
+
+            if (mode === 'solid') {
+                document.getElementById('solidModeBtn').classList.add('active');
+                document.getElementById('waveColorPicker').style.display = 'block';
+                document.getElementById('waveRainbowSliders').classList.remove('active');
+            } else {
+                document.getElementById('rainbowModeBtn').classList.add('active');
+                document.getElementById('waveColorPicker').style.display = 'none';
+                document.getElementById('waveRainbowSliders').classList.add('active');
+            }
+
+            fetch('/wave/mode', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({mode: mode})
+            });
+        }
+
+        function setWaveColor(color) {
+            const r = parseInt(color.substr(1,2), 16);
+            const g = parseInt(color.substr(3,2), 16);
+            const b = parseInt(color.substr(5,2), 16);
+
+            fetch('/wave/color', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({red: r, green: g, blue: b})
+            });
+        }
+
+        function setWaveRainbowSpeed(value) {
+            document.getElementById('waveRainbowSpeedValue').textContent = value;
+            fetch('/wave/rainbow/speed', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({speed: parseInt(value)})
+            });
+        }
+
+        function setWaveRainbowSpread(value) {
+            document.getElementById('waveRainbowSpreadValue').textContent = value;
+            fetch('/wave/rainbow/spread', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({spread: parseInt(value)})
+            });
+        }
+
+        function setWaveSpeed(value) {
+            document.getElementById('waveSpeedValue').textContent = value;
+            fetch('/wave/speed', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({speed: parseInt(value)})
+            });
+        }
+
+        function setRainIntensity(value) {
+            document.getElementById('rainIntensityValue').textContent = value;
+            fetch('/rain/intensity', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({intensity: parseInt(value)})
+            });
+        }
+
+        function setDripsSpawn(value) {
+            document.getElementById('dripsSpawnValue').textContent = value;
+            fetch('/drips/spawn', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({spawn_chance: parseInt(value)})
+            });
+        }
+
+        function setFireworksLaunch(value) {
+            document.getElementById('fireworksLaunchValue').textContent = value;
+            fetch('/fireworks/launch', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({launch_probability: parseInt(value)})
+            });
+        }
+
+        function setFireworksMax(value) {
+            document.getElementById('fireworksMaxValue').textContent = value;
+            fetch('/fireworks/max', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({max_fireworks: parseInt(value)})
+            });
+        }
+
+        function setFireworksSize(value) {
+            document.getElementById('fireworksSizeValue').textContent = value;
+            fetch('/fireworks/size', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({explosion_size: parseInt(value)})
+            });
+        }
+
+        function setRainbowSpeed(value) {
+            document.getElementById('rainbowSpeedValue').textContent = value;
+            fetch('/rainbow/speed', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({speed: parseInt(value)})
+            });
+        }
+
+        function setRainbowSpread(value) {
+            document.getElementById('rainbowSpreadValue').textContent = value;
+            fetch('/rainbow/spread', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({spread: parseInt(value)})
+            });
+        }
+
+        // XMS simulation controls
+        function setXmsRefractory(value) {
+            document.getElementById('xmsRefractoryValue').textContent = value;
+            fetch('/xms/refractory', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({value: parseInt(value)})
+            });
+        }
+
+        function setXmsThreshold(value) {
+            document.getElementById('xmsThresholdValue').textContent = value;
+            fetch('/xms/threshold', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({value: parseInt(value)})
+            });
+        }
+
+        function setXmsTrigger(raw) {
+            // slider 1-100 maps to 0.001-0.100
+            const val = parseInt(raw) / 1000;
+            document.getElementById('xmsTriggerValue').textContent = val.toFixed(3);
+            fetch('/xms/trigger', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({value: val})
+            });
+        }
+
+        // Flame controls
+        function setFlameBaseTemp(raw) {
+            const val = parseInt(raw) / 100;
+            document.getElementById('flameBaseTempValue').textContent = val.toFixed(2);
+            fetch('/flame/base_temp', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({value: val})
+            });
+        }
+
+        function setFlameVarTemp(raw) {
+            const val = parseInt(raw) / 100;
+            document.getElementById('flameVarTempValue').textContent = val.toFixed(2);
+            fetch('/flame/var_temp', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({value: val})
+            });
+        }
+
+        // Lava lamp controls
+        function setLavaMode(mode) {
+            ['lavaSolidBtn', 'lavaMultiBtn', 'lavaRainbowBtn'].forEach(id => {
+                document.getElementById(id).classList.remove('active');
+            });
+            const btn = {solid: 'lavaSolidBtn', multi: 'lavaMultiBtn', rainbow: 'lavaRainbowBtn'}[mode];
+            document.getElementById(btn).classList.add('active');
+            document.getElementById('lavaColorPicker').style.display = (mode === 'solid') ? 'block' : 'none';
+
+            fetch('/lava/mode', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({mode: mode})
+            });
+        }
+
+        function setLavaColor(color) {
+            const r = parseInt(color.substr(1,2), 16);
+            const g = parseInt(color.substr(3,2), 16);
+            const b = parseInt(color.substr(5,2), 16);
+
+            fetch('/lava/color', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({red: r, green: g, blue: b})
+            });
+        }
+
+        function setLavaCount(value) {
+            document.getElementById('lavaCountValue').textContent = value;
+            fetch('/lava/count', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({value: parseInt(value)})
+            });
+        }
+
+        function setLavaSize(value) {
+            document.getElementById('lavaSizeValue').textContent = value;
+            fetch('/lava/size', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({value: parseInt(value)})
+            });
+        }
+
+        function setLavaSpeed(value) {
+            document.getElementById('lavaSpeedValue').textContent = value;
+            fetch('/lava/speed', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({value: parseInt(value)})
+            });
+        }
+
+        // Ocean controls
+        function setOceanSpeed(value) {
+            document.getElementById('oceanSpeedValue').textContent = value;
+            fetch('/ocean/speed', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({value: parseInt(value)})
+            });
+        }
+
+        function setOceanHeight(value) {
+            document.getElementById('oceanHeightValue').textContent = value;
+            fetch('/ocean/height', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({value: parseInt(value)})
+            });
+        }
+
+        // Spiral controls
+        function setSpiralMode(mode) {
+            document.getElementById('spiralSolidBtn').classList.remove('active');
+            document.getElementById('spiralRainbowBtn').classList.remove('active');
+
+            if (mode === 'solid') {
+                document.getElementById('spiralSolidBtn').classList.add('active');
+                document.getElementById('spiralColorPicker').style.display = 'block';
+                document.getElementById('spiralRainbowSliders').classList.remove('active');
+            } else {
+                document.getElementById('spiralRainbowBtn').classList.add('active');
+                document.getElementById('spiralColorPicker').style.display = 'none';
+                document.getElementById('spiralRainbowSliders').classList.add('active');
+            }
+
+            fetch('/spiral/mode', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({mode: mode})
+            });
+        }
+
+        function setSpiralColor(color) {
+            const r = parseInt(color.substr(1,2), 16);
+            const g = parseInt(color.substr(3,2), 16);
+            const b = parseInt(color.substr(5,2), 16);
+
+            fetch('/spiral/color', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({red: r, green: g, blue: b})
+            });
+        }
+
+        function setSpiralRadius(raw) {
+            // slider 5-20 maps to a radius of 0.5-2.0 cells
+            const val = parseInt(raw) / 10;
+            document.getElementById('spiralRadiusValue').textContent = val.toFixed(1);
+            fetch('/spiral/radius', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({value: val})
+            });
+        }
+
+        function setSpiralSpeed(value) {
+            document.getElementById('spiralSpeedValue').textContent = value;
+            fetch('/spiral/speed', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({value: parseInt(value)})
+            });
+        }
+
+        function setSpiralFall(value) {
+            document.getElementById('spiralFallValue').textContent = value;
+            fetch('/spiral/fall', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({value: parseInt(value)})
+            });
+        }
+
+        function setSpiralColorSpeed(value) {
+            document.getElementById('spiralColorSpeedValue').textContent = value;
+            fetch('/spiral/color_speed', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({value: parseInt(value)})
+            });
+        }
+
+        // Shimmer controls
+        function setShimmerColor(color) {
+            const r = parseInt(color.substr(1,2), 16);
+            const g = parseInt(color.substr(3,2), 16);
+            const b = parseInt(color.substr(5,2), 16);
+
+            fetch('/shimmer/color', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({red: r, green: g, blue: b})
+            });
+        }
+
+        function setShimmerColor2(color) {
+            const r = parseInt(color.substr(1,2), 16);
+            const g = parseInt(color.substr(3,2), 16);
+            const b = parseInt(color.substr(5,2), 16);
+
+            fetch('/shimmer/color2', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({red: r, green: g, blue: b})
+            });
+        }
+
+        function setShimmerIntensity(value) {
+            document.getElementById('shimmerIntensityValue').textContent = value;
+            fetch('/shimmer/intensity', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({value: parseInt(value)})
+            });
+        }
+
+        // Reset functions
+        function resetWave() {
+            document.getElementById('xAxisBtn').classList.remove('active');
+            document.getElementById('zAxisBtn').classList.add('active');
+            document.getElementById('solidModeBtn').classList.remove('active');
+            document.getElementById('rainbowModeBtn').classList.add('active');
+            document.getElementById('waveColorPicker').style.display = 'none';
+            document.getElementById('waveRainbowSliders').classList.add('active');
+            document.getElementById('waveColor').value = '#00FFFF';
+            document.getElementById('waveRainbowSpeed').value = 5; document.getElementById('waveRainbowSpeedValue').textContent = 5;
+            document.getElementById('waveRainbowSpread').value = 60; document.getElementById('waveRainbowSpreadValue').textContent = 60;
+            document.getElementById('waveSpeed').value = 3; document.getElementById('waveSpeedValue').textContent = 3;
+            fetch('/wave/axis', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({axis:'z'})});
+            fetch('/wave/mode', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mode:'rainbow'})});
+            fetch('/wave/color', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({red:0,green:255,blue:255})});
+            fetch('/wave/rainbow/speed', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({speed:5})});
+            fetch('/wave/rainbow/spread', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({spread:60})});
+            fetch('/wave/speed', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({speed:3})});
+        }
+
+        function resetRain() {
+            document.getElementById('rainIntensity').value = 5; document.getElementById('rainIntensityValue').textContent = 5;
+            fetch('/rain/intensity', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({intensity:5})});
+        }
+
+        function resetDrips() {
+            document.getElementById('dripsSpawn').value = 5; document.getElementById('dripsSpawnValue').textContent = 5;
+            fetch('/drips/spawn', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({spawn_chance:5})});
+        }
+
+        function resetFireworks() {
+            document.getElementById('fireworksLaunch').value = 4; document.getElementById('fireworksLaunchValue').textContent = 4;
+            document.getElementById('fireworksMax').value = 1; document.getElementById('fireworksMaxValue').textContent = 1;
+            document.getElementById('fireworksSize').value = 5; document.getElementById('fireworksSizeValue').textContent = 5;
+            fetch('/fireworks/launch', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({launch_probability:4})});
+            fetch('/fireworks/max', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({max_fireworks:1})});
+            fetch('/fireworks/size', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({explosion_size:5})});
+        }
+
+        function resetRainbow() {
+            document.getElementById('rainbowSpeed').value = 5; document.getElementById('rainbowSpeedValue').textContent = 5;
+            document.getElementById('rainbowSpread').value = 60; document.getElementById('rainbowSpreadValue').textContent = 60;
+            fetch('/rainbow/speed', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({speed:5})});
+            fetch('/rainbow/spread', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({spread:60})});
+        }
+
+        function resetXms() {
+            document.getElementById('xmsRefractory').value = 6; document.getElementById('xmsRefractoryValue').textContent = 6;
+            document.getElementById('xmsThreshold').value = 5; document.getElementById('xmsThresholdValue').textContent = 5;
+            document.getElementById('xmsTrigger').value = 3; document.getElementById('xmsTriggerValue').textContent = '0.003';
+            fetch('/xms/refractory', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({value:6})});
+            fetch('/xms/threshold', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({value:5})});
+            fetch('/xms/trigger', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({value:0.003})});
+        }
+
+        function resetFlame() {
+            document.getElementById('flameBaseTemp').value = 50; document.getElementById('flameBaseTempValue').textContent = '0.50';
+            document.getElementById('flameVarTemp').value = 50; document.getElementById('flameVarTempValue').textContent = '0.50';
+            fetch('/flame/base_temp', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({value:0.5})});
+            fetch('/flame/var_temp', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({value:0.5})});
+        }
+
+        function resetLava() {
+            document.getElementById('lavaSolidBtn').classList.add('active');
+            document.getElementById('lavaMultiBtn').classList.remove('active');
+            document.getElementById('lavaRainbowBtn').classList.remove('active');
+            document.getElementById('lavaColorPicker').style.display = 'block';
+            document.getElementById('lavaColor').value = '#FF2800';
+            document.getElementById('lavaCount').value = 3; document.getElementById('lavaCountValue').textContent = 3;
+            document.getElementById('lavaSize').value = 5; document.getElementById('lavaSizeValue').textContent = 5;
+            document.getElementById('lavaSpeed').value = 5; document.getElementById('lavaSpeedValue').textContent = 5;
+            fetch('/lava/mode', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mode:'solid'})});
+            fetch('/lava/color', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({red:255,green:40,blue:0})});
+            fetch('/lava/count', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({value:3})});
+            fetch('/lava/size', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({value:5})});
+            fetch('/lava/speed', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({value:5})});
+        }
+
+        function resetOcean() {
+            document.getElementById('oceanSpeed').value = 5; document.getElementById('oceanSpeedValue').textContent = 5;
+            document.getElementById('oceanHeight').value = 5; document.getElementById('oceanHeightValue').textContent = 5;
+            fetch('/ocean/speed', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({value:5})});
+            fetch('/ocean/height', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({value:5})});
+        }
+
+        function resetSpiral() {
+            document.getElementById('spiralSolidBtn').classList.remove('active');
+            document.getElementById('spiralRainbowBtn').classList.add('active');
+            document.getElementById('spiralColorPicker').style.display = 'none';
+            document.getElementById('spiralRainbowSliders').classList.add('active');
+            document.getElementById('spiralColor').value = '#0080FF';
+            document.getElementById('spiralRadius').value = 20; document.getElementById('spiralRadiusValue').textContent = '2.0';
+            document.getElementById('spiralSpeed').value = 5; document.getElementById('spiralSpeedValue').textContent = 5;
+            document.getElementById('spiralFall').value = 5; document.getElementById('spiralFallValue').textContent = 5;
+            document.getElementById('spiralColorSpeed').value = 5; document.getElementById('spiralColorSpeedValue').textContent = 5;
+            fetch('/spiral/mode', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mode:'rainbow'})});
+            fetch('/spiral/color', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({red:0,green:128,blue:255})});
+            fetch('/spiral/radius', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({value:2.0})});
+            fetch('/spiral/speed', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({value:5})});
+            fetch('/spiral/fall', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({value:5})});
+            fetch('/spiral/color_speed', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({value:5})});
+        }
+
+        function resetShimmer() {
+            document.getElementById('shimmerColor').value = '#0050C8';
+            document.getElementById('shimmerColor2').value = '#FFFFFF';
+            document.getElementById('shimmerIntensity').value = 5; document.getElementById('shimmerIntensityValue').textContent = 5;
+            fetch('/shimmer/color', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({red:0,green:80,blue:200})});
+            fetch('/shimmer/color2', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({red:255,green:255,blue:255})});
+            fetch('/shimmer/intensity', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({value:5})});
+        }
+
+        // Game controls
+        function startGame() {
+            fetch('/planes/start', {method: 'POST'})
+                .then(response => response.json())
+                .then(data => {
+                    gameActive = true;
+                    gameLaunched = true;
+                    gameScoreValue = 0;
+                    document.getElementById('gameScore').textContent = '0';
+                    document.getElementById('gameStatus').textContent = 'Playing...';
+                    document.getElementById('gameStatus').classList.remove('game-over');
+
+                    // Start polling for game state
+                    if (gameUpdateInterval) clearInterval(gameUpdateInterval);
+                    gameUpdateInterval = setInterval(updateGameState, 200);
+                });
+        }
+
+        function stopGame() {
+            gameActive = false;
+            gameLaunched = false;
+            document.getElementById('gameStatus').textContent = 'Press Start to Play';
+            document.getElementById('gameStatus').classList.remove('game-over');
+            if (gameUpdateInterval) {
+                clearInterval(gameUpdateInterval);
+                gameUpdateInterval = null;
+            }
+            fetch('/planes/stop', {method: 'POST'});
+        }
+
+        function movePlayer(direction) {
+            if (!gameActive) return;
+
+            fetch('/planes/move', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({direction: direction})
+            });
+        }
+
+        function updateGameState() {
+            if (!gameActive) return;
+
+            fetch('/planes/state')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.score !== undefined) {
+                        document.getElementById('gameScore').textContent = data.score;
+                    }
+                    if (data.highscore !== undefined) {
+                        document.getElementById('gameHighScore').textContent = data.highscore;
+                    }
+                    if (data.game_over) {
+                        gameActive = false;
+                        document.getElementById('gameStatus').textContent = 'GAME OVER!';
+                        document.getElementById('gameStatus').classList.add('game-over');
+                        if (gameUpdateInterval) {
+                            clearInterval(gameUpdateInterval);
+                            gameUpdateInterval = null;
+                        }
+                    }
+                });
+        }
+
+        // Snake controls
+        function startSnake() {
+            fetch('/snake/start', {method: 'POST'})
+                .then(response => response.json())
+                .then(data => {
+                    snakeActive = true;
+                    snakeLaunched = true;
+                    document.getElementById('snakeScore').textContent = '0';
+                    document.getElementById('snakeStatus').textContent = 'Playing...';
+                    document.getElementById('snakeStatus').classList.remove('game-over', 'game-won');
+
+                    if (snakeUpdateInterval) clearInterval(snakeUpdateInterval);
+                    snakeUpdateInterval = setInterval(updateSnakeState, 150);
+                });
+        }
+
+        function stopSnake() {
+            snakeActive = false;
+            snakeLaunched = false;
+            document.getElementById('snakeStatus').textContent = 'Press Start to Play';
+            document.getElementById('snakeStatus').classList.remove('game-over', 'game-won');
+            if (snakeUpdateInterval) {
+                clearInterval(snakeUpdateInterval);
+                snakeUpdateInterval = null;
+            }
+            fetch('/snake/stop', {method: 'POST'});
+        }
+
+        function moveSnake(direction) {
+            if (!snakeActive) return;
+
+            fetch('/snake/move', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({direction: direction})
+            });
+        }
+
+        function updateSnakeState() {
+            if (!snakeActive) return;
+
+            fetch('/snake/state')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.score !== undefined) {
+                        document.getElementById('snakeScore').textContent = data.score;
+                    }
+                    if (data.highscore !== undefined) {
+                        document.getElementById('snakeHighScore').textContent = data.highscore;
+                    }
+                    if (data.game_over) {
+                        snakeActive = false;
+                        const status = document.getElementById('snakeStatus');
+                        if (data.won) {
+                            status.textContent = 'YOU WIN!';
+                            status.classList.add('game-won');
+                            status.classList.remove('game-over');
+                        } else {
+                            status.textContent = 'GAME OVER!';
+                            status.classList.add('game-over');
+                            status.classList.remove('game-won');
+                        }
+                        if (snakeUpdateInterval) {
+                            clearInterval(snakeUpdateInterval);
+                            snakeUpdateInterval = null;
+                        }
+                    }
+                });
+        }
+
+        // Meteors controls
+        function startMeteors() {
+            fetch('/meteors/start', {method: 'POST'})
+                .then(response => response.json())
+                .then(data => {
+                    meteorsActive = true;
+                    meteorsLaunched = true;
+                    document.getElementById('meteorsScore').textContent = '0';
+                    document.getElementById('meteorsStatus').textContent = 'Playing...';
+                    document.getElementById('meteorsStatus').classList.remove('game-over');
+
+                    if (meteorsUpdateInterval) clearInterval(meteorsUpdateInterval);
+                    meteorsUpdateInterval = setInterval(updateMeteorsState, 200);
+                });
+        }
+
+        function stopMeteors() {
+            meteorsActive = false;
+            meteorsLaunched = false;
+            document.getElementById('meteorsStatus').textContent = 'Press Start to Play';
+            document.getElementById('meteorsStatus').classList.remove('game-over');
+            if (meteorsUpdateInterval) {
+                clearInterval(meteorsUpdateInterval);
+                meteorsUpdateInterval = null;
+            }
+            fetch('/meteors/stop', {method: 'POST'});
+        }
+
+        // direction is 'up' / 'down' / 'left' / 'right', or 'fire' to shoot
+        function moveMeteors(direction) {
+            if (!meteorsActive) return;
+
+            fetch('/meteors/move', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({direction: direction})
+            });
+        }
+
+        function updateMeteorsState() {
+            if (!meteorsActive) return;
+
+            fetch('/meteors/state')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.score !== undefined) {
+                        document.getElementById('meteorsScore').textContent = data.score;
+                    }
+                    if (data.highscore !== undefined) {
+                        document.getElementById('meteorsHighScore').textContent = data.highscore;
+                    }
+                    if (data.game_over) {
+                        meteorsActive = false;
+                        document.getElementById('meteorsStatus').textContent = 'GAME OVER!';
+                        document.getElementById('meteorsStatus').classList.add('game-over');
+                        if (meteorsUpdateInterval) {
+                            clearInterval(meteorsUpdateInterval);
+                            meteorsUpdateInterval = null;
+                        }
+                    }
+                });
+        }
+
+        // Keyboard controls - routed to whichever game is active
+        document.addEventListener('keydown', function(e) {
+            if (meteorsActive) {
+                switch(e.key) {
+                    case 'ArrowUp':
+                    case 'w': case 'W':
+                        e.preventDefault(); moveMeteors('up'); break;
+                    case 'ArrowDown':
+                    case 's': case 'S':
+                        e.preventDefault(); moveMeteors('down'); break;
+                    case 'ArrowLeft':
+                    case 'a': case 'A':
+                        e.preventDefault(); moveMeteors('left'); break;
+                    case 'ArrowRight':
+                    case 'd': case 'D':
+                        e.preventDefault(); moveMeteors('right'); break;
+                    case ' ':
+                        e.preventDefault(); moveMeteors('fire'); break;
+                }
+                return;
+            }
+
+            if (snakeActive) {
+                switch(e.key) {
+                    case 'ArrowUp':
+                    case 'w': case 'W':
+                        e.preventDefault(); moveSnake('py'); break;
+                    case 'ArrowDown':
+                    case 's': case 'S':
+                        e.preventDefault(); moveSnake('ny'); break;
+                    case 'ArrowLeft':
+                    case 'a': case 'A':
+                        e.preventDefault(); moveSnake('nx'); break;
+                    case 'ArrowRight':
+                    case 'd': case 'D':
+                        e.preventDefault(); moveSnake('px'); break;
+                    case 'i': case 'I':
+                        e.preventDefault(); moveSnake('pz'); break;
+                    case 'j': case 'J':
+                        e.preventDefault(); moveSnake('nz'); break;
+                }
+                return;
+            }
+
+            if (!gameActive) return;
+
+            switch(e.key) {
+                case 'ArrowUp':
+                case 'w':
+                case 'W':
+                    e.preventDefault();
+                    movePlayer('up');
+                    break;
+                case 'ArrowDown':
+                case 's':
+                case 'S':
+                    e.preventDefault();
+                    movePlayer('down');
+                    break;
+                case 'ArrowLeft':
+                case 'a':
+                case 'A':
+                    e.preventDefault();
+                    movePlayer('left');
+                    break;
+                case 'ArrowRight':
+                case 'd':
+                case 'D':
+                    e.preventDefault();
+                    movePlayer('right');
+                    break;
+            }
+        });
+
+        // Load stored state on page load
+        window.onload = function() {
+            // Show stored high scores before any game is started
+            fetch('/planes/state')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.highscore !== undefined)
+                        document.getElementById('gameHighScore').textContent = data.highscore;
+                });
+            fetch('/snake/state')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.highscore !== undefined)
+                        document.getElementById('snakeHighScore').textContent = data.highscore;
+                });
+            fetch('/meteors/state')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.highscore !== undefined)
+                        document.getElementById('meteorsHighScore').textContent = data.highscore;
+                });
+        };
+    </script>
+</body>
+</html>

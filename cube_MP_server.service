@@ -1,0 +1,16 @@
+[Unit]
+Description=RGB LED Cube web controller
+After=network.target
+
+[Service]
+Type=simple
+User=cube
+WorkingDirectory=/home/cube/share
+ExecStart=/usr/bin/python3 /home/cube/share/cube_MP_server.py
+Restart=on-failure
+RestartSec=2
+KillSignal=SIGTERM
+TimeoutStopSec=10
+
+[Install]
+WantedBy=multi-user.target
