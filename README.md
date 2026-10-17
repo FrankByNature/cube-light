@@ -1,6 +1,6 @@
 # Cube Light
 
-Software for a home-built **5×5×5 RGB LED cube**: a Raspberry Pi web controller that runs animated patterns and playable 3D games, plus the RP2040 firmware inside the cube that drives the LEDs.
+Software for a home-built **5×5×5 RGB LED cube**: a Raspberry Pi web controller that runs animated patterns and playable 3D games, plus the RP2040 firmware that drives the LEDs.
 
 ```
  Phone / browser ──HTTP──▶ Raspberry Pi (cube_MP_server.py) ──I2C──▶ RP2040(s) ──▶ 125 WS2812 LEDs
