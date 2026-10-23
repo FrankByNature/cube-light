@@ -37,6 +37,61 @@ def save_highscore(game, value):
     except OSError:
         pass
 
+# Bluetooth controller bridge (game_controller_bridge.py), started/stopped from
+# the web UI. Only the main (Flask) process ever touches these; the bridge is a
+# separate client process that talks to this server over HTTP like the UI does.
+BRIDGE_SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'game_controller_bridge.py')
+BRIDGE_LOG = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'controller_bridge.log')
+_bridge_proc = None
+_bridge_lock = threading.Lock()
+
+def bridge_running():
+    return _bridge_proc is not None and _bridge_proc.poll() is None
+
+def start_bridge():
+    """Launch the bridge (no-op if already running); its output goes to BRIDGE_LOG."""
+    global _bridge_proc
+    with _bridge_lock:
+        if bridge_running():
+            return
+        with open(BRIDGE_LOG, 'w') as log:   # child keeps its own handle
+            _bridge_proc = subprocess.Popen(
+                [sys.executable, '-u', BRIDGE_SCRIPT],
+                stdout=log, stderr=subprocess.STDOUT,
+                cwd=os.path.dirname(BRIDGE_SCRIPT))
+
+def stop_bridge():
+    global _bridge_proc
+    with _bridge_lock:
+        if bridge_running():
+            _bridge_proc.terminate()
+            try:
+                _bridge_proc.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                _bridge_proc.kill()
+                _bridge_proc.wait()
+        _bridge_proc = None
+
+def bridge_link_status():
+    """Best guess at the Bluetooth link state, from the tail of the bridge log."""
+    try:
+        with open(BRIDGE_LOG, 'rb') as f:
+            f.seek(0, os.SEEK_END)
+            f.seek(max(0, f.tell() - 4096))
+            lines = f.read().decode('utf-8', errors='replace').splitlines()
+    except OSError:
+        return ''
+    for line in reversed(lines):
+        if 'not found' in line:
+            return 'No /dev/rfcomm0 - run rfcomm bind'
+        if 'Serial error' in line:
+            return 'Waiting for controller...'
+        if line.startswith('Connected'):
+            return 'Controller connected'
+        if line.startswith('Opening'):
+            return 'Connecting...'
+    return ''
+
 # Set spawn context
 if __name__ == '__main__':
     multiprocessing.set_start_method('spawn', force=True)
@@ -1425,6 +1480,28 @@ def create_flask_app(command_queue, brightness_value,
         return jsonify({'score': meteors_score.value, 'game_over': meteors_game_over.value,
                         'highscore': meteors_highscore.value})
 
+    # Bluetooth controller bridge
+    def bridge_state():
+        running = bridge_running()
+        return {'running': running, 'link': bridge_link_status() if running else ''}
+
+    @app.route('/bridge/start', methods=['POST'])
+    def start_bridge_route():
+        try:
+            start_bridge()
+        except OSError as e:
+            return jsonify({'status': 'error', 'message': str(e)}), 500
+        return jsonify(bridge_state())
+
+    @app.route('/bridge/stop', methods=['POST'])
+    def stop_bridge_route():
+        stop_bridge()
+        return jsonify(bridge_state())
+
+    @app.route('/bridge/state', methods=['GET'])
+    def get_bridge_state():
+        return jsonify(bridge_state())
+
     return app
 
 if __name__ == '__main__':
@@ -1471,6 +1548,7 @@ if __name__ == '__main__':
 
     def cleanup():
         print("\nShutting down...")
+        stop_bridge()
         cube_process.terminate()
         cube_process.join(timeout=2)
         try:
