@@ -3,3 +3,4 @@ __pycache__/
 .claude/settings.local.json
 # Runtime state written by the server
 highscores.json
+controller_bridge.log

@@ -12,20 +12,25 @@ any machine that can reach the server and the controller).
 --------------------------------------------------------------------------
 Controller protocol  (ESP32 -> this script), one token per line:
     px nx py ny pz nz     6 direction buttons (axis +/-)
-    fire                  Fire button (Meteors only; ignored by the other games)
     start                 Start button: (re)start the selected game
     game:planes           selection changed to Space Planes
     game:snake            selection changed to 3D Snake
     game:meteors          selection changed to Meteors
+
+Display protocol  (this script -> ESP32), sent whenever it changes:
+    disp:<game>:<score>:<highscore>:<status>
+        status is ready | play | over | won; '-' marks an unknown value
+        (server unreachable, or --test mode). The bridge polls the selected
+        game's /<game>/state every POLL_INTERVAL seconds to build it, and the
+        ESP32 shows it on its OLED.
 --------------------------------------------------------------------------
 
 Direction mapping:
     Snake  uses all six -> px/nx/py/ny/pz/nz are sent straight through.
-    Planes is 2D (front plane only), so only 4 axis buttons are used:
-        py -> right   ny -> left   pz -> up   nz -> down     (px/nx ignored)
-    Meteors is 2D too (bottom plane), mapped like the web UI's keys for Snake:
-        px -> right   nx -> left   py -> up   ny -> down     (pz/nz ignored)
-    and the Fire button shoots.
+    Planes and Meteors are 2D, so the X/Y buttons act as a d-pad for both:
+        px -> right   nx -> left   py -> up   ny -> down     (pz ignored)
+    Planes also ignores nz.
+    and Z- (nz) shoots - there is no dedicated Fire button.
 
 Game selection:
     The Select button on the ESP32 cycles Planes -> Snake -> Meteors and sends a
@@ -75,17 +80,17 @@ except ImportError:
 
 DIRECTIONS = {'px', 'nx', 'py', 'ny', 'pz', 'nz'}
 
-# Planes only understands these 4 (front-plane) directions, so the 3D axis
-# buttons are mapped onto them. px/nx (depth) have no meaning in Planes.
+# Planes only understands these 4 (front-plane) directions; the X/Y buttons
+# are used as a d-pad, same as Meteors. pz/nz are unused in Planes.
 PLANES_FROM_AXIS = {
-    'py': 'right',
-    'ny': 'left',
-    'pz': 'up',
-    'nz': 'down',
+    'px': 'right',
+    'nx': 'left',
+    'py': 'up',
+    'ny': 'down',
 }
 
 # Meteors moves in the bottom (x/y) plane; same axis->pad mapping as the web
-# UI uses for Snake's arrow keys. pz/nz have no meaning in Meteors.
+# UI uses for Snake's arrow keys. nz is the fire button; pz is unused.
 METEORS_FROM_AXIS = {
     'px': 'right',
     'nx': 'left',
@@ -94,6 +99,11 @@ METEORS_FROM_AXIS = {
 }
 
 VALID_GAMES = ('planes', 'snake', 'meteors')
+
+# How often the selected game's /state is polled for the controller's OLED,
+# and how long one poll may block the input loop.
+POLL_INTERVAL = 0.5
+POLL_TIMEOUT = 0.5
 
 
 class Bridge:
@@ -105,6 +115,7 @@ class Bridge:
         self.timeout = timeout
         self.selected = 'planes'   # mirrors the web UI's default game
         self.running = False
+        self.last_display = None   # last status line sent to the controller's OLED
 
     # -- HTTP helper -------------------------------------------------------
     def _post(self, path, json=None):
@@ -120,6 +131,43 @@ class Bridge:
             requests.post(self.server + path, json=json, timeout=self.timeout)
         except requests.RequestException as e:
             print(f"    !! POST {path} failed: {e}", file=sys.stderr)
+
+    def _get(self, path):
+        """GET JSON from the cube server; None in test mode or on any failure."""
+        if self.test or requests is None:
+            return None
+        try:
+            r = requests.get(self.server + path, timeout=POLL_TIMEOUT)
+            r.raise_for_status()
+            return r.json()
+        except (requests.RequestException, ValueError):
+            return None
+
+    # -- controller display ------------------------------------------------
+    def display_line(self):
+        """Status line for the controller's OLED:
+        disp:<game>:<score>:<highscore>:<ready|play|over|won>  ('-' = unknown)."""
+        state = self._get(f'/{self.selected}/state')
+        if state is None:
+            return f"disp:{self.selected}:-:-:ready"
+        if not self.running:
+            status = 'ready'
+        elif state.get('won'):
+            status = 'won'
+        elif state.get('game_over'):
+            status = 'over'
+        else:
+            status = 'play'
+        return (f"disp:{self.selected}:{state.get('score', '-')}:"
+                f"{state.get('highscore', '-')}:{status}")
+
+    def update_display(self, ser):
+        """Send the status line to the controller, but only when it changed."""
+        line = self.display_line()
+        if line != self.last_display:
+            print(f"> {line}")
+            ser.write((line + '\n').encode('utf-8'))
+            self.last_display = line
 
     # -- token handling ----------------------------------------------------
     def handle(self, token):
@@ -143,10 +191,6 @@ class Bridge:
             self.move(token)
             return
 
-        if token == 'fire':
-            self.fire()
-            return
-
         print(f"  ? unrecognised token: {token!r}")
 
     def select_game(self, name):
@@ -167,6 +211,10 @@ class Bridge:
             print(f"  move snake {axis}")
             self._post('/snake/move', {'direction': axis})
         elif self.selected == 'meteors':
+            if axis == 'nz':
+                print("  FIRE")
+                self._post('/meteors/fire')
+                return
             direction = METEORS_FROM_AXIS.get(axis)
             if direction is None:
                 print(f"  (meteors) ignoring {axis}")
@@ -181,13 +229,6 @@ class Bridge:
             print(f"  move planes {direction}")
             self._post('/planes/move', {'direction': direction})
 
-    def fire(self):
-        if self.selected != 'meteors':
-            print(f"  ({self.selected}) ignoring fire")
-            return
-        print("  FIRE")
-        self._post('/meteors/fire')
-
 
 def reader_loop(port, baud, bridge):
     """Open the serial port, feed decoded lines to the bridge, reconnect on drop."""
@@ -201,19 +242,31 @@ def reader_loop(port, baud, bridge):
     while True:
         try:
             print(f"Opening {port} ...")
-            with serial.Serial(port, baud, timeout=1) as ser:
+            with serial.Serial(port, baud, timeout=0.1) as ser:
                 print(f"Connected ({mode}).")
                 print(f"Selected game: {bridge.selected}.  Waiting for input "
                       "(Ctrl+C to quit) ...")
+                bridge.last_display = None   # force a display refresh on (re)connect
+                next_poll = 0.0
+                buf = b''
                 while True:
-                    line = ser.readline()
-                    if not line:
-                        continue  # read timeout - just keep waiting
-                    token = line.decode('utf-8', errors='replace').strip()
+                    # Keep the controller's OLED current (score, high score).
+                    if time.monotonic() >= next_poll:
+                        bridge.update_display(ser)
+                        next_poll = time.monotonic() + POLL_INTERVAL
+
+                    # readline() returns a partial line on timeout, so buffer
+                    # until the newline arrives.
+                    buf += ser.readline()
+                    if not buf.endswith(b'\n'):
+                        continue
+                    token = buf.decode('utf-8', errors='replace').strip()
+                    buf = b''
                     if not token:
                         continue
                     print(f"< {token!r}")
                     bridge.handle(token)
+                    next_poll = 0.0   # selection/start changes show up right away
         except serial.SerialException as e:
             print(f"Serial error: {e}.  Retrying in 3s ...", file=sys.stderr)
             time.sleep(3)

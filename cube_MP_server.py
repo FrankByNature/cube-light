@@ -37,6 +37,61 @@ def save_highscore(game, value):
     except OSError:
         pass
 
+# Bluetooth controller bridge (game_controller_bridge.py), started/stopped from
+# the web UI. Only the main (Flask) process ever touches these; the bridge is a
+# separate client process that talks to this server over HTTP like the UI does.
+BRIDGE_SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'game_controller_bridge.py')
+BRIDGE_LOG = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'controller_bridge.log')
+_bridge_proc = None
+_bridge_lock = threading.Lock()
+
+def bridge_running():
+    return _bridge_proc is not None and _bridge_proc.poll() is None
+
+def start_bridge():
+    """Launch the bridge (no-op if already running); its output goes to BRIDGE_LOG."""
+    global _bridge_proc
+    with _bridge_lock:
+        if bridge_running():
+            return
+        with open(BRIDGE_LOG, 'w') as log:   # child keeps its own handle
+            _bridge_proc = subprocess.Popen(
+                [sys.executable, '-u', BRIDGE_SCRIPT],
+                stdout=log, stderr=subprocess.STDOUT,
+                cwd=os.path.dirname(BRIDGE_SCRIPT))
+
+def stop_bridge():
+    global _bridge_proc
+    with _bridge_lock:
+        if bridge_running():
+            _bridge_proc.terminate()
+            try:
+                _bridge_proc.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                _bridge_proc.kill()
+                _bridge_proc.wait()
+        _bridge_proc = None
+
+def bridge_link_status():
+    """Best guess at the Bluetooth link state, from the tail of the bridge log."""
+    try:
+        with open(BRIDGE_LOG, 'rb') as f:
+            f.seek(0, os.SEEK_END)
+            f.seek(max(0, f.tell() - 4096))
+            lines = f.read().decode('utf-8', errors='replace').splitlines()
+    except OSError:
+        return ''
+    for line in reversed(lines):
+        if 'not found' in line:
+            return 'No /dev/rfcomm0 - run rfcomm bind'
+        if 'Serial error' in line:
+            return 'Waiting for controller...'
+        if line.startswith('Connected'):
+            return 'Controller connected'
+        if line.startswith('Opening'):
+            return 'Connecting...'
+    return ''
+
 # Set spawn context
 if __name__ == '__main__':
     multiprocessing.set_start_method('spawn', force=True)
@@ -181,10 +236,6 @@ class PlanesGame:
     # drawn across both, brightness split by how close it is to each.
     COLLIDE_RANGE = 0.5  # a plane hits the dot while |x| < this (nearest slice is 0)
 
-    # The tenth plane is a scrolling rainbow
-    RAINBOW_SPREAD = 40.0   # hue degrees between neighbouring diagonals
-    RAINBOW_SCROLL = 240.0  # hue degrees per second (scrolls backwards)
-
     # Planes come in groups of 10: nine with a 2x2 hole, then one with a
     # single-pixel hole, then a short pause before the next (faster) group.
     GROUP_SIZE = 10
@@ -251,15 +302,6 @@ class PlanesGame:
         mask = np.ones((5, 5), dtype=bool)
         mask[hole_y:hole_y + hole_size, hole_z:hole_z + hole_size] = False
         return mask
-
-    def _rainbow_colours(self, age):
-        """(5, 5, 3) rainbow across the plane's diagonals, scrolling backwards."""
-        colours = np.empty((5, 5, 3))
-        base = -self.RAINBOW_SCROLL * age
-        for y in range(5):
-            for z in range(5):
-                colours[y, z] = hsv_to_rgb(base + (y + z) * self.RAINBOW_SPREAD, 1.0, 1.0)
-        return colours
 
     @staticmethod
     def _speed_for_score(score):
@@ -367,10 +409,12 @@ class PlanesGame:
             hole_size = 1 if final else 2
             hole_pos = self._pick_hole(hole_size, group)
             # The first nine of each group step from red through the
-            # spectrum; the tenth is a scrolling rainbow.
-            hue = index / self.GROUP_SIZE * 360.0
+            # spectrum; the tenth is white.
             colours = np.empty((5, 5, 3))
-            colours[:, :] = hsv_to_rgb(hue, 1.0, 1.0)
+            if final:
+                colours[:, :] = 255
+            else:
+                colours[:, :] = hsv_to_rgb(index / self.GROUP_SIZE * 360.0, 1.0, 1.0)
 
             self.planes.append({
                 'mask': self._create_plane_mask(hole_size, hole_pos),
@@ -378,7 +422,6 @@ class PlanesGame:
                 'hole_size': hole_size,
                 'spawn_time': now,
                 'colours': colours,
-                'rainbow': final,
                 'moving': False,   # Starts moving forward after fade-in
                 'scored': False,
                 'x': 4.0           # Back of the cube
@@ -426,8 +469,6 @@ class PlanesGame:
         # x, weighted by distance, so it glides rather than jumps.
         frame = np.zeros((5, 5, 5, 3))
         for obj in self.planes:
-            if obj['rainbow']:
-                obj['colours'] = self._rainbow_colours(now - obj['spawn_time'])
             plane = obj['colours'] * obj['mask'][:, :, None]
             if obj['moving']:
                 lower = int(np.floor(obj['x']))
@@ -1425,6 +1466,28 @@ def create_flask_app(command_queue, brightness_value,
         return jsonify({'score': meteors_score.value, 'game_over': meteors_game_over.value,
                         'highscore': meteors_highscore.value})
 
+    # Bluetooth controller bridge
+    def bridge_state():
+        running = bridge_running()
+        return {'running': running, 'link': bridge_link_status() if running else ''}
+
+    @app.route('/bridge/start', methods=['POST'])
+    def start_bridge_route():
+        try:
+            start_bridge()
+        except OSError as e:
+            return jsonify({'status': 'error', 'message': str(e)}), 500
+        return jsonify(bridge_state())
+
+    @app.route('/bridge/stop', methods=['POST'])
+    def stop_bridge_route():
+        stop_bridge()
+        return jsonify(bridge_state())
+
+    @app.route('/bridge/state', methods=['GET'])
+    def get_bridge_state():
+        return jsonify(bridge_state())
+
     return app
 
 if __name__ == '__main__':
@@ -1471,6 +1534,7 @@ if __name__ == '__main__':
 
     def cleanup():
         print("\nShutting down...")
+        stop_bridge()
         cube_process.terminate()
         cube_process.join(timeout=2)
         try:

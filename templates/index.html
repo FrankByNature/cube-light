@@ -470,7 +470,7 @@
                 • Steer the green dot around the front plane (◀ ▶ left/right, ▲ ▼ up/down)<br>
                 • Planes fade in at the back, then fly forward through all 5 planes<br>
                 • Each plane has a hole — line your dot up with it<br>
-                • Planes come in groups of 10: nine with a 2×2 hole, then a rainbow plane with a single-pixel hole<br>
+                • Planes come in groups of 10: nine with a 2×2 hole, then a white plane with a single-pixel hole<br>
                 • Each new group is faster, and the holes can jump further from the last one<br>
                 • Get hit and your dot goes out in a firework
             </div>
@@ -553,6 +553,15 @@
                 • Meteors arrive faster the longer you survive
             </div>
         </div>
+
+        <!-- Bluetooth controller bridge -->
+        <div class="control-group" style="text-align: center;">
+            <label>🎮 Bluetooth Controller</label>
+            <div class="mode-toggle" style="margin-top: 10px;">
+                <button id="bridgeBtn" class="game-start-btn" onclick="toggleBridge()">▶️ Start Controller</button>
+            </div>
+            <div id="bridgeStatus" style="color: #888; font-size: 14px;">Checking...</div>
+        </div>
     </div>
 
     <script>
@@ -609,6 +618,37 @@
             document.getElementById('snakeGame').style.display = (name === 'snake') ? 'block' : 'none';
             document.getElementById('meteorsGame').style.display = (name === 'meteors') ? 'block' : 'none';
         }
+
+        // Bluetooth controller bridge: one toggle button + a status line, polled
+        let bridgeRunning = false;
+
+        function showBridgeState(state) {
+            bridgeRunning = state.running;
+            const btn = document.getElementById('bridgeBtn');
+            btn.textContent = bridgeRunning ? '⏹️ Stop Controller' : '▶️ Start Controller';
+            btn.className = bridgeRunning ? 'game-stop-btn' : 'game-start-btn';
+            document.getElementById('bridgeStatus').textContent =
+                bridgeRunning ? (state.link || 'Running') : 'Stopped';
+        }
+
+        function refreshBridge() {
+            fetch('/bridge/state').then(r => r.json()).then(showBridgeState).catch(() => {});
+        }
+
+        function toggleBridge() {
+            fetch(bridgeRunning ? '/bridge/stop' : '/bridge/start', {method: 'POST'})
+                .then(r => r.json())
+                .then(state => {
+                    if (state.status === 'error') {
+                        document.getElementById('bridgeStatus').textContent = 'Error: ' + state.message;
+                    } else {
+                        showBridgeState(state);
+                    }
+                });
+        }
+
+        refreshBridge();
+        setInterval(refreshBridge, 3000);
 
         // Brightness control - keeps both tab sliders (Control + Patterns) in sync
         function updateBrightness(value) {
