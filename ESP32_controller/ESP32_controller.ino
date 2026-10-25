@@ -50,14 +50,14 @@ BluetoothSerial SerialBT;
 // (0, 2, 5, 12, 15), the input-only pins (34-39), the flash pins (6-11), the
 // USB-serial pins (1, 3) and the OLED's I2C pins (21, 22).
 // Other free pins that work just as well: 16, 17, 18, 19, 23.
-const int PIN_XP     = 32;  // X+
-const int PIN_XN     = 33;  // X-
-const int PIN_YP     = 25;  // Y+
-const int PIN_YN     = 26;  // Y-
-const int PIN_ZP     = 27;  // Z+
-const int PIN_ZN     = 14;  // Z- (also Fire in Meteors)
-const int PIN_START  = 13;  // Start
-const int PIN_SELECT = 4;   // Select
+const int PIN_XP     = 23;  // X+
+const int PIN_XN     = 18;  // X-
+const int PIN_YP     = 32;  // Y+
+const int PIN_YN     = 19;  // Y-
+const int PIN_ZP     = 14;  // Z+
+const int PIN_ZN     = 27;  // Z- (also Fire in Meteors)
+const int PIN_START  = 17;  // Start
+const int PIN_SELECT = 16;   // Select
 
 // ---- OLED ----------------------------------------------------------------
 const int PIN_OLED_SDA = 21;

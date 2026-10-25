@@ -236,10 +236,6 @@ class PlanesGame:
     # drawn across both, brightness split by how close it is to each.
     COLLIDE_RANGE = 0.5  # a plane hits the dot while |x| < this (nearest slice is 0)
 
-    # The tenth plane is a scrolling rainbow
-    RAINBOW_SPREAD = 40.0   # hue degrees between neighbouring diagonals
-    RAINBOW_SCROLL = 240.0  # hue degrees per second (scrolls backwards)
-
     # Planes come in groups of 10: nine with a 2x2 hole, then one with a
     # single-pixel hole, then a short pause before the next (faster) group.
     GROUP_SIZE = 10
@@ -306,15 +302,6 @@ class PlanesGame:
         mask = np.ones((5, 5), dtype=bool)
         mask[hole_y:hole_y + hole_size, hole_z:hole_z + hole_size] = False
         return mask
-
-    def _rainbow_colours(self, age):
-        """(5, 5, 3) rainbow across the plane's diagonals, scrolling backwards."""
-        colours = np.empty((5, 5, 3))
-        base = -self.RAINBOW_SCROLL * age
-        for y in range(5):
-            for z in range(5):
-                colours[y, z] = hsv_to_rgb(base + (y + z) * self.RAINBOW_SPREAD, 1.0, 1.0)
-        return colours
 
     @staticmethod
     def _speed_for_score(score):
@@ -422,10 +409,12 @@ class PlanesGame:
             hole_size = 1 if final else 2
             hole_pos = self._pick_hole(hole_size, group)
             # The first nine of each group step from red through the
-            # spectrum; the tenth is a scrolling rainbow.
-            hue = index / self.GROUP_SIZE * 360.0
+            # spectrum; the tenth is white.
             colours = np.empty((5, 5, 3))
-            colours[:, :] = hsv_to_rgb(hue, 1.0, 1.0)
+            if final:
+                colours[:, :] = 255
+            else:
+                colours[:, :] = hsv_to_rgb(index / self.GROUP_SIZE * 360.0, 1.0, 1.0)
 
             self.planes.append({
                 'mask': self._create_plane_mask(hole_size, hole_pos),
@@ -433,7 +422,6 @@ class PlanesGame:
                 'hole_size': hole_size,
                 'spawn_time': now,
                 'colours': colours,
-                'rainbow': final,
                 'moving': False,   # Starts moving forward after fade-in
                 'scored': False,
                 'x': 4.0           # Back of the cube
@@ -481,8 +469,6 @@ class PlanesGame:
         # x, weighted by distance, so it glides rather than jumps.
         frame = np.zeros((5, 5, 5, 3))
         for obj in self.planes:
-            if obj['rainbow']:
-                obj['colours'] = self._rainbow_colours(now - obj['spawn_time'])
             plane = obj['colours'] * obj['mask'][:, :, None]
             if obj['moving']:
                 lower = int(np.floor(obj['x']))

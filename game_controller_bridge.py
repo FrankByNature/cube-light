@@ -27,10 +27,9 @@ Display protocol  (this script -> ESP32), sent whenever it changes:
 
 Direction mapping:
     Snake  uses all six -> px/nx/py/ny/pz/nz are sent straight through.
-    Planes is 2D (front plane only), so only 4 axis buttons are used:
-        py -> right   ny -> left   pz -> up   nz -> down     (px/nx ignored)
-    Meteors is 2D too (bottom plane), mapped like the web UI's keys for Snake:
+    Planes and Meteors are 2D, so the X/Y buttons act as a d-pad for both:
         px -> right   nx -> left   py -> up   ny -> down     (pz ignored)
+    Planes also ignores nz.
     and Z- (nz) shoots - there is no dedicated Fire button.
 
 Game selection:
@@ -81,13 +80,13 @@ except ImportError:
 
 DIRECTIONS = {'px', 'nx', 'py', 'ny', 'pz', 'nz'}
 
-# Planes only understands these 4 (front-plane) directions, so the 3D axis
-# buttons are mapped onto them. px/nx (depth) have no meaning in Planes.
+# Planes only understands these 4 (front-plane) directions; the X/Y buttons
+# are used as a d-pad, same as Meteors. pz/nz are unused in Planes.
 PLANES_FROM_AXIS = {
-    'py': 'right',
-    'ny': 'left',
-    'pz': 'up',
-    'nz': 'down',
+    'px': 'right',
+    'nx': 'left',
+    'py': 'up',
+    'ny': 'down',
 }
 
 # Meteors moves in the bottom (x/y) plane; same axis->pad mapping as the web
