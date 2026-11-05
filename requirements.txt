@@ -1,0 +1,12 @@
+# Runtime dependencies for the cube server (install on the Raspberry Pi).
+#   pip install -r requirements.txt
+flask>=2.2
+numpy>=1.20
+# I2C access. `smbus` is the Debian/Raspberry Pi OS package (apt install
+# python3-smbus); `smbus2` is the pip-installable drop-in and is used if
+# `smbus` is missing. Neither is needed to run the server in simulated mode.
+smbus2>=0.4
+
+# Only needed for game_controller_bridge.py (Bluetooth controller):
+pyserial>=3.5
+requests>=2.25

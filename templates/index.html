@@ -1,13 +1,11 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
+    <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>5x5x5 LED Cube Controller</title>
     <style>
         body { font-family: Arial, sans-serif; max-width: 400px; margin: 20px auto; padding: 20px; background: #1a1a1a; color: #fff; }
-        h1 { text-align: center; margin-bottom: 10px; }
-        .subtitle { text-align: center; color: #888; margin-bottom: 10px; font-size: 14px; }
-        .multicore { text-align: center; color: #4CAF50; margin-bottom: 30px; font-size: 12px; }
 
         /* Tab Navigation */
         .tabs { display: flex; gap: 5px; margin-bottom: 20px; background: #2a2a2a; border-radius: 10px; padding: 5px; }
@@ -33,9 +31,13 @@
         .pattern-button.active { background: #ff9800; }
         .mode-toggle { display: flex; gap: 10px; margin-bottom: 20px; }
         .mode-toggle button { flex: 1; }
-        .status { text-align: center; margin-top: 20px; padding: 10px; background: #333; border-radius: 5px; font-size: 12px; color: #888; }
-        .wave-controls { display: none; margin-top: 15px; padding: 15px; background: #333; border-radius: 5px; }
-        .wave-controls.active { display: block; }
+        .status { text-align: center; margin-top: 10px; padding: 10px; background: #333; border-radius: 5px; font-size: 12px; color: #888; }
+        .status.error { color: #f44336; }
+
+        /* One class for every per-pattern settings panel; the panel's
+           data-pattern attribute says which pattern it belongs to. */
+        .pattern-controls { display: none; margin-top: 15px; padding: 15px; background: #333; border-radius: 5px; }
+        .pattern-controls.active { display: block; }
         .wave-mode-toggle { display: flex; gap: 10px; margin-bottom: 15px; }
         .wave-mode-toggle button { flex: 1; padding: 10px; }
         .wave-mode-toggle button.active { background: #ff9800; }
@@ -43,31 +45,14 @@
         .slider-label { display: flex; justify-content: space-between; margin-bottom: 5px; }
         .rainbow-sliders { display: none; }
         .rainbow-sliders.active { display: block; }
-        .rainbow-controls { display: none; margin-top: 15px; padding: 15px; background: #333; border-radius: 5px; }
-        .rainbow-controls.active { display: block; }
-        .rain-controls { display: none; margin-top: 15px; padding: 15px; background: #333; border-radius: 5px; }
-        .rain-controls.active { display: block; }
-        .drips-controls { display: none; margin-top: 15px; padding: 15px; background: #333; border-radius: 5px; }
-        .drips-controls.active { display: block; }
-        .fireworks-controls { display: none; margin-top: 15px; padding: 15px; background: #333; border-radius: 5px; }
-        .fireworks-controls.active { display: block; }
-        .xms-controls { display: none; margin-top: 15px; padding: 15px; background: #333; border-radius: 5px; }
-        .xms-controls.active { display: block; }
-        .flame-controls { display: none; margin-top: 15px; padding: 15px; background: #333; border-radius: 5px; }
-        .flame-controls.active { display: block; }
-        .lava-controls { display: none; margin-top: 15px; padding: 15px; background: #333; border-radius: 5px; }
-        .lava-controls.active { display: block; }
-        .ocean-controls { display: none; margin-top: 15px; padding: 15px; background: #333; border-radius: 5px; }
-        .ocean-controls.active { display: block; }
-        .spiral-controls { display: none; margin-top: 15px; padding: 15px; background: #333; border-radius: 5px; }
-        .spiral-controls.active { display: block; }
-        .shimmer-controls { display: none; margin-top: 15px; padding: 15px; background: #333; border-radius: 5px; }
-        .shimmer-controls.active { display: block; }
         .reset-btn { background: #555; color: #ccc; font-size: 13px; padding: 8px 14px; margin-top: 12px; width: 100%; }
         .reset-btn:hover { background: #777; color: #fff; }
 
+        /* Preview */
+        #previewCanvas { display: block; width: 100%; max-width: 320px; margin: 10px auto 0; background: #111; border-radius: 10px; }
+        .preview-note { text-align: center; font-size: 12px; color: #888; margin-top: 8px; }
+
         /* Game Styles */
-        .game-controls { display: grid; gap: 15px; }
         .direction-pad { display: grid; grid-template-columns: 1fr 1fr 1fr; grid-template-rows: 1fr 1fr 1fr; gap: 10px; max-width: 250px; margin: 20px auto; }
         .direction-btn { padding: 20px; font-size: 20px; background: #2196F3; border: none; border-radius: 10px; cursor: pointer; color: white; transition: all 0.2s; }
         .direction-btn:hover { background: #0b7dda; transform: scale(1.05); }
@@ -89,14 +74,15 @@
         .game-start-btn:hover { background: #45a049; }
         .game-stop-btn { background: #f44336; }
         .game-stop-btn:hover { background: #da190b; }
+        .how-to { margin-top: 20px; padding: 15px; background: #333; border-radius: 10px; font-size: 12px; color: #888; }
     </style>
 </head>
 <body>
     <!-- Tab Navigation -->
     <div class="tabs">
-        <button class="tab-button active" onclick="switchTab('control')">Control</button>
-        <button class="tab-button" onclick="switchTab('patterns')">Patterns</button>
-        <button class="tab-button" onclick="switchTab('games')">Games</button>
+        <button class="tab-button active" onclick="switchTab('control', this)">Control</button>
+        <button class="tab-button" onclick="switchTab('patterns', this)">Patterns</button>
+        <button class="tab-button" onclick="switchTab('games', this)">Games</button>
     </div>
 
     <!-- Control Tab -->
@@ -127,58 +113,73 @@
         </div>
 
         <div class="control-group">
+            <label>Preview</label>
+            <div class="mode-toggle" style="margin-bottom: 0;">
+                <button id="previewBtn" class="pattern-button" onclick="togglePreview()">👁️ Show Preview</button>
+            </div>
+            <canvas id="previewCanvas" width="320" height="320" style="display: none;"></canvas>
+            <div id="previewNote" class="preview-note"></div>
+        </div>
+
+        <div class="control-group">
             <label>Raspberry Pi</label>
             <div class="pattern-buttons">
                 <button class="off-button" onclick="shutdownPi()">Shut Down Pi</button>
             </div>
         </div>
+
+        <div id="connStatus" class="status"></div>
     </div>
 
     <!-- Patterns Tab -->
     <div id="patterns-tab" class="tab-content">
         <div class="control-group">
             <label for="patternBrightness">Brightness</label>
-            <input type="range" id="patternBrightness" min="0" max="100" value="{{ initial_brightness }}" oninput="updatePatternBrightness(this.value)">
+            <input type="range" id="patternBrightness" min="0" max="100" value="{{ initial_brightness }}" oninput="updateBrightness(this.value)">
             <div class="value-display"><span id="patternBrightnessValue">{{ initial_brightness }}</span>%</div>
         </div>
 
         <div class="control-group">
             <label>Select Pattern</label>
             <div class="pattern-buttons">
-                <button class="pattern-button" onclick="startPattern('rainbow', this)">🌈 Rainbow</button>
-                <button class="pattern-button" onclick="startPattern('fireworks', this)">🎆 Fireworks</button>
-                <button class="pattern-button" onclick="startPattern('wave', this)">🌊 Wave</button>
-                <button class="pattern-button" onclick="startPattern('rain', this)">🌧️ Rain</button>
-                <button class="pattern-button" onclick="startPattern('flame', this)">🔥 Flame</button>
-                <button class="pattern-button" onclick="startPattern('XMS', this)">💥 Explosions</button>
-                <button class="pattern-button" onclick="startPattern('drips', this)">💧 Drips</button>
-                <button class="pattern-button" onclick="startPattern('lava', this)">🌋 Lava Lamp</button>
-                <button class="pattern-button" onclick="startPattern('ocean', this)">🫧 Ocean</button>
-                <button class="pattern-button" onclick="startPattern('spiral', this)">🌀 Spiral</button>
-                <button class="pattern-button" onclick="startPattern('shimmer', this)">✨ Shimmer</button>
+                <button class="pattern-button" data-pattern="rainbow" onclick="startPattern('rainbow')">🌈 Rainbow</button>
+                <button class="pattern-button" data-pattern="fireworks" onclick="startPattern('fireworks')">🎆 Fireworks</button>
+                <button class="pattern-button" data-pattern="wave" onclick="startPattern('wave')">🌊 Wave</button>
+                <button class="pattern-button" data-pattern="rain" onclick="startPattern('rain')">🌧️ Rain</button>
+                <button class="pattern-button" data-pattern="flame" onclick="startPattern('flame')">🔥 Flame</button>
+                <button class="pattern-button" data-pattern="XMS" onclick="startPattern('XMS')">💥 Explosions</button>
+                <button class="pattern-button" data-pattern="drips" onclick="startPattern('drips')">💧 Drips</button>
+                <button class="pattern-button" data-pattern="lava" onclick="startPattern('lava')">🌋 Lava Lamp</button>
+                <button class="pattern-button" data-pattern="ocean" onclick="startPattern('ocean')">🫧 Ocean</button>
+                <button class="pattern-button" data-pattern="spiral" onclick="startPattern('spiral')">🌀 Spiral</button>
+                <button class="pattern-button" data-pattern="shimmer" onclick="startPattern('shimmer')">✨ Shimmer</button>
                 <button class="off-button" onclick="stopPattern()">⏹️ Stop</button>
             </div>
 
-            <div id="waveControls" class="wave-controls">
+            <!-- Per-pattern settings. Every slider / colour picker carries
+                 data-state and data-key naming the patterns.py dict entry it
+                 controls; the TUNABLES table in the script maps those to URLs. -->
+
+            <div class="pattern-controls" data-pattern="wave">
                 <label>🌊 Wave Settings</label>
                 <div class="wave-mode-toggle">
-                    <button id="zAxisBtn" class="active" onclick="setWaveAxis('z')">Z-axis</button>
-                    <button id="xAxisBtn" onclick="setWaveAxis('x')">X-axis</button>
+                    <button id="zAxisBtn" class="active" onclick="setMode('wave_state', 'axis', 'z')">Z-axis</button>
+                    <button id="xAxisBtn" onclick="setMode('wave_state', 'axis', 'x')">X-axis</button>
                 </div>
                 <div class="wave-mode-toggle">
-                    <button id="rainbowModeBtn" class="active" onclick="setWaveMode('rainbow')">Rainbow</button>
-                    <button id="solidModeBtn" onclick="setWaveMode('solid')">Solid Color</button>
+                    <button id="rainbowModeBtn" class="active" onclick="setMode('wave_state', 'color_mode', 'rainbow')">Rainbow</button>
+                    <button id="solidModeBtn" onclick="setMode('wave_state', 'color_mode', 'solid')">Solid Colour</button>
                 </div>
                 <div class="slider-group">
                     <div class="slider-label">
                         <label>Wave Speed</label>
                         <span id="waveSpeedValue">3</span>
                     </div>
-                    <input type="range" id="waveSpeed" min="1" max="10" value="3" oninput="setWaveSpeed(this.value)">
+                    <input type="range" id="waveSpeed" data-state="wave_state" data-key="wave_speed" min="1" max="10" value="3" oninput="sliderChanged(this)">
                 </div>
                 <div id="waveColorPicker" style="display: none;">
-                    <label for="waveColor">Wave Color</label>
-                    <input type="color" id="waveColor" value="#00FFFF" onchange="setWaveColor(this.value)">
+                    <label for="waveColor">Wave Colour</label>
+                    <input type="color" id="waveColor" data-state="wave_state" data-key="color" value="#00FFFF" onchange="colourChanged(this)">
                 </div>
                 <div id="waveRainbowSliders" class="rainbow-sliders active">
                     <div class="slider-group">
@@ -186,217 +187,217 @@
                             <label>Rainbow Speed</label>
                             <span id="waveRainbowSpeedValue">5</span>
                         </div>
-                        <input type="range" id="waveRainbowSpeed" min="1" max="20" value="5" oninput="setWaveRainbowSpeed(this.value)">
+                        <input type="range" id="waveRainbowSpeed" data-state="wave_state" data-key="rainbow_speed" min="1" max="20" value="5" oninput="sliderChanged(this)">
                     </div>
                     <div class="slider-group">
                         <div class="slider-label">
                             <label>Rainbow Spread</label>
                             <span id="waveRainbowSpreadValue">60</span>
                         </div>
-                        <input type="range" id="waveRainbowSpread" min="10" max="120" value="60" oninput="setWaveRainbowSpread(this.value)">
+                        <input type="range" id="waveRainbowSpread" data-state="wave_state" data-key="rainbow_spread" min="10" max="120" value="60" oninput="sliderChanged(this)">
                     </div>
                 </div>
-                <button class="reset-btn" onclick="resetWave()">↺ Reset to Defaults</button>
+                <button class="reset-btn" onclick="resetPattern('wave_state')">↺ Reset to Defaults</button>
             </div>
 
-            <div id="rainControls" class="rain-controls">
+            <div class="pattern-controls" data-pattern="rain">
                 <label>🌧️ Rain Settings</label>
                 <div class="slider-group">
                     <div class="slider-label">
                         <label>Intensity</label>
                         <span id="rainIntensityValue">5</span>
                     </div>
-                    <input type="range" id="rainIntensity" min="1" max="10" value="5" oninput="setRainIntensity(this.value)">
+                    <input type="range" id="rainIntensity" data-state="rain_state" data-key="intensity" min="1" max="10" value="5" oninput="sliderChanged(this)">
                 </div>
-                <button class="reset-btn" onclick="resetRain()">↺ Reset to Defaults</button>
+                <button class="reset-btn" onclick="resetPattern('rain_state')">↺ Reset to Defaults</button>
             </div>
 
-            <div id="dripsControls" class="drips-controls">
+            <div class="pattern-controls" data-pattern="drips">
                 <label>💧 Drips Settings</label>
                 <div class="slider-group">
                     <div class="slider-label">
                         <label>Spawn Rate</label>
                         <span id="dripsSpawnValue">5</span>
                     </div>
-                    <input type="range" id="dripsSpawn" min="1" max="10" value="5" oninput="setDripsSpawn(this.value)">
+                    <input type="range" id="dripsSpawn" data-state="drips_state" data-key="spawn_chance" min="1" max="10" value="5" oninput="sliderChanged(this)">
                 </div>
-                <button class="reset-btn" onclick="resetDrips()">↺ Reset to Defaults</button>
+                <button class="reset-btn" onclick="resetPattern('drips_state')">↺ Reset to Defaults</button>
             </div>
 
-            <div id="fireworksControls" class="fireworks-controls">
+            <div class="pattern-controls" data-pattern="fireworks">
                 <label>🎆 Fireworks Settings</label>
                 <div class="slider-group">
                     <div class="slider-label">
                         <label>Max Fireworks</label>
                         <span id="fireworksMaxValue">1</span>
                     </div>
-                    <input type="range" id="fireworksMax" min="1" max="5" value="1" oninput="setFireworksMax(this.value)">
+                    <input type="range" id="fireworksMax" data-state="fireworks_state" data-key="max_fireworks" min="1" max="5" value="1" oninput="sliderChanged(this)">
                 </div>
                 <div class="slider-group">
                     <div class="slider-label">
                         <label>Launch Rate</label>
                         <span id="fireworksLaunchValue">4</span>
                     </div>
-                    <input type="range" id="fireworksLaunch" min="1" max="10" value="4" oninput="setFireworksLaunch(this.value)">
+                    <input type="range" id="fireworksLaunch" data-state="fireworks_state" data-key="launch_probability" min="1" max="10" value="4" oninput="sliderChanged(this)">
                 </div>
                 <div class="slider-group">
                     <div class="slider-label">
                         <label>Explosion Size</label>
                         <span id="fireworksSizeValue">5</span>
                     </div>
-                    <input type="range" id="fireworksSize" min="1" max="10" value="5" oninput="setFireworksSize(this.value)">
+                    <input type="range" id="fireworksSize" data-state="fireworks_state" data-key="explosion_size" min="1" max="10" value="5" oninput="sliderChanged(this)">
                 </div>
-                <button class="reset-btn" onclick="resetFireworks()">↺ Reset to Defaults</button>
+                <button class="reset-btn" onclick="resetPattern('fireworks_state')">↺ Reset to Defaults</button>
             </div>
 
-            <div id="rainbowControls" class="rainbow-controls">
+            <div class="pattern-controls" data-pattern="rainbow">
                 <label>🌈 Rainbow Settings</label>
                 <div class="slider-group">
                     <div class="slider-label">
                         <label>Rainbow Speed</label>
                         <span id="rainbowSpeedValue">5</span>
                     </div>
-                    <input type="range" id="rainbowSpeed" min="1" max="20" value="5" oninput="setRainbowSpeed(this.value)">
+                    <input type="range" id="rainbowSpeed" data-state="rainbow_state" data-key="speed" min="1" max="20" value="5" oninput="sliderChanged(this)">
                 </div>
                 <div class="slider-group">
                     <div class="slider-label">
                         <label>Colour Spread</label>
                         <span id="rainbowSpreadValue">60</span>
                     </div>
-                    <input type="range" id="rainbowSpread" min="10" max="120" value="60" oninput="setRainbowSpread(this.value)">
+                    <input type="range" id="rainbowSpread" data-state="rainbow_state" data-key="spread" min="10" max="120" value="60" oninput="sliderChanged(this)">
                 </div>
-                <button class="reset-btn" onclick="resetRainbow()">↺ Reset to Defaults</button>
+                <button class="reset-btn" onclick="resetPattern('rainbow_state')">↺ Reset to Defaults</button>
             </div>
 
-            <div id="xmsControls" class="xms-controls">
+            <div class="pattern-controls" data-pattern="XMS">
                 <label>💥 Explosions Settings</label>
                 <div class="slider-group">
                     <div class="slider-label">
                         <label>Excitation Threshold</label>
                         <span id="xmsThresholdValue">5</span>
                     </div>
-                    <input type="range" id="xmsThreshold" min="1" max="20" value="5" step="1" oninput="setXmsThreshold(this.value)">
+                    <input type="range" id="xmsThreshold" data-state="xms_state" data-key="excitation_threshold" min="1" max="20" value="5" step="1" oninput="sliderChanged(this)">
                 </div>
                 <div class="slider-group">
                     <div class="slider-label">
                         <label>Refractory Period</label>
                         <span id="xmsRefractoryValue">6</span>
                     </div>
-                    <input type="range" id="xmsRefractory" min="1" max="20" value="6" step="1" oninput="setXmsRefractory(this.value)">
+                    <input type="range" id="xmsRefractory" data-state="xms_state" data-key="refractory_period" min="1" max="20" value="6" step="1" oninput="sliderChanged(this)">
                 </div>
                 <div class="slider-group">
                     <div class="slider-label">
                         <label>Trigger Probability</label>
                         <span id="xmsTriggerValue">0.003</span>
                     </div>
-                    <input type="range" id="xmsTrigger" min="1" max="100" value="3" step="1" oninput="setXmsTrigger(this.value)">
+                    <input type="range" id="xmsTrigger" data-state="xms_state" data-key="trigger_probability" min="1" max="100" value="3" step="1" oninput="sliderChanged(this)">
                 </div>
-                <button class="reset-btn" onclick="resetXms()">↺ Reset to Defaults</button>
+                <button class="reset-btn" onclick="resetPattern('xms_state')">↺ Reset to Defaults</button>
             </div>
 
-            <div id="flameControls" class="flame-controls">
+            <div class="pattern-controls" data-pattern="flame">
                 <label>🔥 Flame Settings</label>
                 <div class="slider-group">
                     <div class="slider-label">
                         <label>Intensity</label>
                         <span id="flameBaseTempValue">0.50</span>
                     </div>
-                    <input type="range" id="flameBaseTemp" min="10" max="100" value="50" step="1" oninput="setFlameBaseTemp(this.value)">
+                    <input type="range" id="flameBaseTemp" data-state="flame_state" data-key="base_temp" min="10" max="100" value="50" step="1" oninput="sliderChanged(this)">
                 </div>
                 <div class="slider-group">
                     <div class="slider-label">
                         <label>Randomness</label>
                         <span id="flameVarTempValue">0.50</span>
                     </div>
-                    <input type="range" id="flameVarTemp" min="0" max="100" value="50" step="1" oninput="setFlameVarTemp(this.value)">
+                    <input type="range" id="flameVarTemp" data-state="flame_state" data-key="var_temp" min="0" max="100" value="50" step="1" oninput="sliderChanged(this)">
                 </div>
-                <button class="reset-btn" onclick="resetFlame()">↺ Reset to Defaults</button>
+                <button class="reset-btn" onclick="resetPattern('flame_state')">↺ Reset to Defaults</button>
             </div>
 
-            <div id="lavaControls" class="lava-controls">
+            <div class="pattern-controls" data-pattern="lava">
                 <label>🌋 Lava Lamp Settings</label>
                 <div class="wave-mode-toggle">
-                    <button id="lavaSolidBtn" class="active" onclick="setLavaMode('solid')">Solid</button>
-                    <button id="lavaMultiBtn" onclick="setLavaMode('multi')">Multi</button>
-                    <button id="lavaRainbowBtn" onclick="setLavaMode('rainbow')">Rainbow</button>
+                    <button id="lavaSolidBtn" class="active" onclick="setMode('lava_state', 'color_mode', 'solid')">Solid</button>
+                    <button id="lavaMultiBtn" onclick="setMode('lava_state', 'color_mode', 'multi')">Multi</button>
+                    <button id="lavaRainbowBtn" onclick="setMode('lava_state', 'color_mode', 'rainbow')">Rainbow</button>
                 </div>
                 <div id="lavaColorPicker">
                     <label for="lavaColor">Blob Colour</label>
-                    <input type="color" id="lavaColor" value="#FF2800" onchange="setLavaColor(this.value)">
+                    <input type="color" id="lavaColor" data-state="lava_state" data-key="color" value="#FF2800" onchange="colourChanged(this)">
                 </div>
                 <div class="slider-group">
                     <div class="slider-label">
                         <label>Number of Blobs</label>
                         <span id="lavaCountValue">3</span>
                     </div>
-                    <input type="range" id="lavaCount" min="1" max="6" value="3" oninput="setLavaCount(this.value)">
+                    <input type="range" id="lavaCount" data-state="lava_state" data-key="count" min="1" max="6" value="3" oninput="sliderChanged(this)">
                 </div>
                 <div class="slider-group">
                     <div class="slider-label">
                         <label>Blob Size</label>
                         <span id="lavaSizeValue">5</span>
                     </div>
-                    <input type="range" id="lavaSize" min="1" max="10" value="5" oninput="setLavaSize(this.value)">
+                    <input type="range" id="lavaSize" data-state="lava_state" data-key="size" min="1" max="10" value="5" oninput="sliderChanged(this)">
                 </div>
                 <div class="slider-group">
                     <div class="slider-label">
                         <label>Drift Speed</label>
                         <span id="lavaSpeedValue">5</span>
                     </div>
-                    <input type="range" id="lavaSpeed" min="1" max="20" value="5" oninput="setLavaSpeed(this.value)">
+                    <input type="range" id="lavaSpeed" data-state="lava_state" data-key="speed" min="1" max="20" value="5" oninput="sliderChanged(this)">
                 </div>
-                <button class="reset-btn" onclick="resetLava()">↺ Reset to Defaults</button>
+                <button class="reset-btn" onclick="resetPattern('lava_state')">↺ Reset to Defaults</button>
             </div>
 
-            <div id="oceanControls" class="ocean-controls">
+            <div class="pattern-controls" data-pattern="ocean">
                 <label>🫧 Ocean Settings</label>
                 <div class="slider-group">
                     <div class="slider-label">
                         <label>Wave Speed</label>
                         <span id="oceanSpeedValue">5</span>
                     </div>
-                    <input type="range" id="oceanSpeed" min="1" max="10" value="5" oninput="setOceanSpeed(this.value)">
+                    <input type="range" id="oceanSpeed" data-state="ocean_state" data-key="speed" min="1" max="10" value="5" oninput="sliderChanged(this)">
                 </div>
                 <div class="slider-group">
                     <div class="slider-label">
                         <label>Wave Height</label>
                         <span id="oceanHeightValue">5</span>
                     </div>
-                    <input type="range" id="oceanHeight" min="1" max="10" value="5" oninput="setOceanHeight(this.value)">
+                    <input type="range" id="oceanHeight" data-state="ocean_state" data-key="height" min="1" max="10" value="5" oninput="sliderChanged(this)">
                 </div>
-                <button class="reset-btn" onclick="resetOcean()">↺ Reset to Defaults</button>
+                <button class="reset-btn" onclick="resetPattern('ocean_state')">↺ Reset to Defaults</button>
             </div>
 
-            <div id="spiralControls" class="spiral-controls">
+            <div class="pattern-controls" data-pattern="spiral">
                 <label>🌀 Spiral Settings</label>
                 <div class="wave-mode-toggle">
-                    <button id="spiralRainbowBtn" class="active" onclick="setSpiralMode('rainbow')">Rainbow</button>
-                    <button id="spiralSolidBtn" onclick="setSpiralMode('solid')">Solid Colour</button>
+                    <button id="spiralRainbowBtn" class="active" onclick="setMode('spiral_state', 'color_mode', 'rainbow')">Rainbow</button>
+                    <button id="spiralSolidBtn" onclick="setMode('spiral_state', 'color_mode', 'solid')">Solid Colour</button>
                 </div>
                 <div id="spiralColorPicker" style="display: none;">
                     <label for="spiralColor">Spiral Colour</label>
-                    <input type="color" id="spiralColor" value="#0080FF" onchange="setSpiralColor(this.value)">
+                    <input type="color" id="spiralColor" data-state="spiral_state" data-key="color" value="#0080FF" onchange="colourChanged(this)">
                 </div>
                 <div class="slider-group">
                     <div class="slider-label">
                         <label>Radius</label>
                         <span id="spiralRadiusValue">2.0</span>
                     </div>
-                    <input type="range" id="spiralRadius" min="5" max="20" value="20" step="1" oninput="setSpiralRadius(this.value)">
+                    <input type="range" id="spiralRadius" data-state="spiral_state" data-key="radius" min="5" max="20" value="20" step="1" oninput="sliderChanged(this)">
                 </div>
                 <div class="slider-group">
                     <div class="slider-label">
                         <label>Rotation Speed</label>
                         <span id="spiralSpeedValue">5</span>
                     </div>
-                    <input type="range" id="spiralSpeed" min="1" max="10" value="5" oninput="setSpiralSpeed(this.value)">
+                    <input type="range" id="spiralSpeed" data-state="spiral_state" data-key="speed" min="1" max="10" value="5" oninput="sliderChanged(this)">
                 </div>
                 <div class="slider-group">
                     <div class="slider-label">
                         <label>Fall Speed</label>
                         <span id="spiralFallValue">5</span>
                     </div>
-                    <input type="range" id="spiralFall" min="1" max="10" value="5" oninput="setSpiralFall(this.value)">
+                    <input type="range" id="spiralFall" data-state="spiral_state" data-key="fall_speed" min="1" max="10" value="5" oninput="sliderChanged(this)">
                 </div>
                 <div id="spiralRainbowSliders" class="rainbow-sliders active">
                     <div class="slider-group">
@@ -404,30 +405,30 @@
                             <label>Colour Speed</label>
                             <span id="spiralColorSpeedValue">5</span>
                         </div>
-                        <input type="range" id="spiralColorSpeed" min="1" max="10" value="5" oninput="setSpiralColorSpeed(this.value)">
+                        <input type="range" id="spiralColorSpeed" data-state="spiral_state" data-key="color_speed" min="1" max="10" value="5" oninput="sliderChanged(this)">
                     </div>
                 </div>
-                <button class="reset-btn" onclick="resetSpiral()">↺ Reset to Defaults</button>
+                <button class="reset-btn" onclick="resetPattern('spiral_state')">↺ Reset to Defaults</button>
             </div>
 
-            <div id="shimmerControls" class="shimmer-controls">
+            <div class="pattern-controls" data-pattern="shimmer">
                 <label>✨ Shimmer Settings</label>
                 <div>
                     <label for="shimmerColor">Main Colour</label>
-                    <input type="color" id="shimmerColor" value="#0050C8" onchange="setShimmerColor(this.value)">
+                    <input type="color" id="shimmerColor" data-state="shimmer_state" data-key="color" value="#0050C8" onchange="colourChanged(this)">
                 </div>
                 <div style="margin-top: 15px;">
                     <label for="shimmerColor2">Shimmer Colour</label>
-                    <input type="color" id="shimmerColor2" value="#FFFFFF" onchange="setShimmerColor2(this.value)">
+                    <input type="color" id="shimmerColor2" data-state="shimmer_state" data-key="color2" value="#FFFFFF" onchange="colourChanged(this)">
                 </div>
                 <div class="slider-group">
                     <div class="slider-label">
                         <label>Shimmer Intensity</label>
                         <span id="shimmerIntensityValue">5</span>
                     </div>
-                    <input type="range" id="shimmerIntensity" min="1" max="10" value="5" oninput="setShimmerIntensity(this.value)">
+                    <input type="range" id="shimmerIntensity" data-state="shimmer_state" data-key="intensity" min="1" max="10" value="5" oninput="sliderChanged(this)">
                 </div>
-                <button class="reset-btn" onclick="resetShimmer()">↺ Reset to Defaults</button>
+                <button class="reset-btn" onclick="resetPattern('shimmer_state')">↺ Reset to Defaults</button>
             </div>
         </div>
     </div>
@@ -444,7 +445,7 @@
         <!-- Space Planes -->
         <div id="planesGame" class="control-group">
             <h2 style="margin-top: 0; text-align: center;">🚀 Space Planes</h2>
-            <p style="text-align: center; color: #888; font-size: 14px;">Planes fly in from the back — line your dot up with each hole to survive.</p>
+            <p style="text-align: center; color: #888; font-size: 14px;">Planes fly in from the back. Line your dot up with each hole to survive.</p>
 
             <div class="mode-toggle">
                 <button class="game-start-btn" onclick="startGame()">▶️ Start Game</button>
@@ -465,12 +466,12 @@
                 <button class="direction-btn down" onclick="movePlayer('down')">▼</button>
             </div>
 
-            <div style="margin-top: 20px; padding: 15px; background: #333; border-radius: 10px; font-size: 12px; color: #888;">
+            <div class="how-to">
                 <strong>How to Play:</strong><br>
-                • Steer the green dot around the front plane (◀ ▶ left/right, ▲ ▼ up/down)<br>
+                • Steer the white dot around the front plane (◀ ▶ left/right, ▲ ▼ up/down), or use the arrow keys / W A S D<br>
                 • Planes fade in at the back, then fly forward through all 5 planes<br>
-                • Each plane has a hole — line your dot up with it<br>
-                • Planes come in groups of 10: nine with a 2×2 hole, then a white plane with a single-pixel hole<br>
+                • Each plane has a hole: line your dot up with it<br>
+                • Planes come in groups of 10: nine coloured planes with a 2×2 hole, then a white plane with a single-pixel hole<br>
                 • Each new group is faster, and the holes can jump further from the last one<br>
                 • Get hit and your dot goes out in a firework
             </div>
@@ -479,7 +480,7 @@
         <!-- 3D Snake -->
         <div id="snakeGame" class="control-group" style="display: none;">
             <h2 style="margin-top: 0; text-align: center;">🐍 3D Snake</h2>
-            <p style="text-align: center; color: #888; font-size: 14px;">Steer the snake through the cube. Eat the red food, avoid yourself. Edges wrap around.</p>
+            <p style="text-align: center; color: #888; font-size: 14px;">Steer the snake through the cube. Eat the food, avoid yourself. Edges wrap around.</p>
 
             <div class="mode-toggle">
                 <button class="game-start-btn" onclick="startSnake()">▶️ Start Game</button>
@@ -507,10 +508,11 @@
                 <button class="direction-btn" onclick="moveSnake('nz')">Z− ⬇</button>
             </div>
 
-            <div style="margin-top: 20px; padding: 15px; background: #333; border-radius: 10px; font-size: 12px; color: #888;">
+            <div class="how-to">
                 <strong>How to Play:</strong><br>
-                • Move with the pad or keys: <strong>W/A/S/D</strong> for X/Y, <strong>I/J</strong> for Z up/down<br>
-                • Eat the red food to grow and score — the snake fades from green at the head to orange at the tail<br>
+                • Move with the pad or keys: <strong>W/A/S/D</strong> or the arrow keys for X/Y, <strong>I/J</strong> for Z up/down<br>
+                • Eat the red food to grow and score 1. The snake fades from green at the head to yellow at the tail<br>
+                • Every 5th red food drops a <strong>purple bonus</strong> worth 5 points. It fades out after 10 seconds, so be quick<br>
                 • The cube wraps: leaving one face re-enters the opposite face<br>
                 • Game ends if the snake runs into its own body<br>
                 • Fill the entire cube to <strong>win</strong>!
@@ -544,11 +546,11 @@
                 <button class="direction-btn" style="background: #4CAF50;" onclick="moveMeteors('fire')">🔫 Fire</button>
             </div>
 
-            <div style="margin-top: 20px; padding: 15px; background: #333; border-radius: 10px; font-size: 12px; color: #888;">
+            <div class="how-to">
                 <strong>How to Play:</strong><br>
                 • Move the blue dot around the bottom plane with the <strong>arrow keys</strong> or <strong>W/A/S/D</strong><br>
-                • Press <strong>Space</strong> to fire a green shot straight up<br>
-                • Meteors brighten in the top plane, then fall — hit one to blow it up<br>
+                • Press <strong>Space</strong> (or the Fire button) to fire a green shot straight up<br>
+                • Meteors brighten in the top plane, then fall. Hit one to blow it up<br>
                 • If a meteor reaches the bottom, it's game over<br>
                 • Meteors arrive faster the longer you survive
             </div>
@@ -565,32 +567,65 @@
     </div>
 
     <script>
+        // ------------------------------------------------------------------
+        // Shared helpers
+        // ------------------------------------------------------------------
+        const JSON_HEADERS = {'Content-Type': 'application/json'};
+
+        // Every request goes through here so a dead server shows up in the
+        // status line instead of silently doing nothing.
+        function api(url, options) {
+            return fetch(url, options)
+                .then(r => {
+                    setConnStatus('');
+                    return r.json().then(data => {
+                        if (!r.ok) {
+                            setConnStatus('Error: ' + (data.message || r.status), true);
+                            throw new Error(data.message || ('HTTP ' + r.status));
+                        }
+                        return data;
+                    });
+                })
+                .catch(err => {
+                    if (err instanceof TypeError) {   // network failure
+                        setConnStatus('Cannot reach the cube server', true);
+                    }
+                    throw err;
+                });
+        }
+        function post(url, bodyObj, extraHeaders) {
+            const options = {method: 'POST', headers: Object.assign({}, extraHeaders || {})};
+            if (bodyObj !== undefined) {
+                Object.assign(options.headers, JSON_HEADERS);
+                options.body = JSON.stringify(bodyObj);
+            }
+            return api(url, options);
+        }
+        function setConnStatus(text, isError) {
+            const el = document.getElementById('connStatus');
+            el.textContent = text;
+            el.classList.toggle('error', !!isError);
+            el.style.display = text ? 'block' : 'none';
+        }
+        function hexToRgb(hex) {
+            return {red: parseInt(hex.substr(1, 2), 16),
+                    green: parseInt(hex.substr(3, 2), 16),
+                    blue: parseInt(hex.substr(5, 2), 16)};
+        }
+        function rgbToHex(rgb) {
+            return '#' + rgb.map(c => Math.max(0, Math.min(255, c)).toString(16).padStart(2, '0')).join('');
+        }
+
+        // ------------------------------------------------------------------
+        // Tabs
+        // ------------------------------------------------------------------
         let currentPattern = null;
-        let gameActive = false;
-        let gameLaunched = false;   // true from start until explicit stop (survives game-over)
-        let gameScoreValue = 0;
-        let gameUpdateInterval = null;
-        let currentGame = 'planes';
-        let snakeActive = false;
-        let snakeLaunched = false;  // true from start until explicit stop (survives game-over)
-        let snakeUpdateInterval = null;
-        let meteorsActive = false;
-        let meteorsLaunched = false;  // true from start until explicit stop (survives game-over)
-        let meteorsUpdateInterval = null;
 
-        // Tab switching
-        function switchTab(tabName) {
-            // Hide all tabs
-            document.querySelectorAll('.tab-content').forEach(tab => {
-                tab.classList.remove('active');
-            });
-            document.querySelectorAll('.tab-button').forEach(btn => {
-                btn.classList.remove('active');
-            });
-
-            // Show selected tab
+        function switchTab(tabName, button) {
+            document.querySelectorAll('.tab-content').forEach(tab => tab.classList.remove('active'));
+            document.querySelectorAll('.tab-button').forEach(btn => btn.classList.remove('active'));
             document.getElementById(tabName + '-tab').classList.add('active');
-            event.target.classList.add('active');
+            button.classList.add('active');
 
             // Stop patterns and games when switching tabs
             if (tabName !== 'patterns' && currentPattern) {
@@ -603,23 +638,273 @@
             }
         }
 
-        // Switch between the games; stop whichever is currently running
-        function selectGame(name) {
-            if (name === currentGame) return;
-            if (gameActive || gameLaunched) stopGame();
-            if (snakeActive || snakeLaunched) stopSnake();
-            if (meteorsActive || meteorsLaunched) stopMeteors();
-            currentGame = name;
-
-            document.getElementById('planesGameBtn').classList.toggle('active', name === 'planes');
-            document.getElementById('snakeGameBtn').classList.toggle('active', name === 'snake');
-            document.getElementById('meteorsGameBtn').classList.toggle('active', name === 'meteors');
-            document.getElementById('planesGame').style.display = (name === 'planes') ? 'block' : 'none';
-            document.getElementById('snakeGame').style.display = (name === 'snake') ? 'block' : 'none';
-            document.getElementById('meteorsGame').style.display = (name === 'meteors') ? 'block' : 'none';
+        // ------------------------------------------------------------------
+        // Brightness (debounced: the slider fires on every step of a drag)
+        // ------------------------------------------------------------------
+        let brightnessTimer = null;
+        function updateBrightness(value) {
+            document.getElementById('brightnessValue').textContent = value;
+            document.getElementById('patternBrightnessValue').textContent = value;
+            document.getElementById('brightness').value = value;
+            document.getElementById('patternBrightness').value = value;
+            clearTimeout(brightnessTimer);
+            brightnessTimer = setTimeout(() => {
+                post('/cube/brightness', {brightness: parseInt(value)}).catch(() => {});
+            }, 60);
         }
 
+        // ------------------------------------------------------------------
+        // Static colour
+        // ------------------------------------------------------------------
+        function fillCube(color) {
+            clearPatternUI();
+            post('/cube/fill', hexToRgb(color)).catch(() => {});
+        }
+
+        function setColor(hex) {
+            document.getElementById('colorPicker').value = hex;
+            fillCube(hex);
+        }
+
+        function turnOff() {
+            post('/cube/off').catch(() => {});
+            clearPatternUI();
+        }
+
+        // Shut down the Raspberry Pi itself (not just the cube). The custom
+        // header is what the server checks for - a web page on another
+        // origin can't add one without a CORS preflight, which we don't answer.
+        function shutdownPi() {
+            if (!confirm('Shut down the Raspberry Pi? You will need to power-cycle it to use the cube again.')) {
+                return;
+            }
+            post('/system/shutdown', undefined, {'X-Cube-Confirm': 'shutdown'}).then(() => {
+                alert('Shutting down. Wait ~30 seconds before disconnecting power.');
+            }).catch(() => {});
+        }
+
+        // ------------------------------------------------------------------
+        // Patterns
+        // ------------------------------------------------------------------
+        function showPatternUI(patternName) {
+            document.querySelectorAll('.pattern-button').forEach(btn => {
+                btn.classList.toggle('active', btn.dataset.pattern === patternName);
+            });
+            document.querySelectorAll('.pattern-controls').forEach(panel => {
+                panel.classList.toggle('active', panel.dataset.pattern === patternName);
+            });
+            currentPattern = patternName;
+        }
+
+        function clearPatternUI() {
+            showPatternUI(null);
+        }
+
+        function startPattern(patternName) {
+            showPatternUI(patternName);
+            post('/pattern/start', {pattern: patternName}).catch(() => clearPatternUI());
+        }
+
+        function stopPattern() {
+            post('/pattern/stop').catch(() => {});
+            clearPatternUI();
+        }
+
+        // ------------------------------------------------------------------
+        // Live tuning. One table describes every tunable: which patterns.py
+        // dict entry it is (state/key), the route and JSON key the server
+        // expects, and how the slider position maps to the stored value
+        // (scale: slider = value * scale; decimals: how to print it).
+        // Colour pickers and mode buttons use the same table.
+        // ------------------------------------------------------------------
+        const TUNABLES = [
+            {state: 'wave_state',      key: 'rainbow_speed',        url: '/wave/rainbow/speed',  json: 'speed',              slider: 'waveRainbowSpeed',  out: 'waveRainbowSpeedValue'},
+            {state: 'wave_state',      key: 'rainbow_spread',       url: '/wave/rainbow/spread', json: 'spread',             slider: 'waveRainbowSpread', out: 'waveRainbowSpreadValue'},
+            {state: 'wave_state',      key: 'wave_speed',           url: '/wave/speed',          json: 'speed',              slider: 'waveSpeed',         out: 'waveSpeedValue'},
+            {state: 'wave_state',      key: 'color',                url: '/wave/color',          colour: 'waveColor'},
+            {state: 'wave_state',      key: 'color_mode',           url: '/wave/mode',           json: 'mode',
+                mode: {rainbow: 'rainbowModeBtn', solid: 'solidModeBtn'},
+                effect: m => { document.getElementById('waveColorPicker').style.display = (m === 'solid') ? 'block' : 'none';
+                               document.getElementById('waveRainbowSliders').classList.toggle('active', m === 'rainbow'); }},
+            {state: 'wave_state',      key: 'axis',                 url: '/wave/axis',           json: 'axis',
+                mode: {z: 'zAxisBtn', x: 'xAxisBtn'}},
+            {state: 'rain_state',      key: 'intensity',            url: '/rain/intensity',      json: 'intensity',          slider: 'rainIntensity',     out: 'rainIntensityValue'},
+            {state: 'drips_state',     key: 'spawn_chance',         url: '/drips/spawn',         json: 'spawn_chance',       slider: 'dripsSpawn',        out: 'dripsSpawnValue'},
+            {state: 'fireworks_state', key: 'launch_probability',   url: '/fireworks/launch',    json: 'launch_probability', slider: 'fireworksLaunch',   out: 'fireworksLaunchValue'},
+            {state: 'fireworks_state', key: 'max_fireworks',        url: '/fireworks/max',       json: 'max_fireworks',      slider: 'fireworksMax',      out: 'fireworksMaxValue'},
+            {state: 'fireworks_state', key: 'explosion_size',       url: '/fireworks/size',      json: 'explosion_size',     slider: 'fireworksSize',     out: 'fireworksSizeValue'},
+            {state: 'rainbow_state',   key: 'speed',                url: '/rainbow/speed',       json: 'speed',              slider: 'rainbowSpeed',      out: 'rainbowSpeedValue'},
+            {state: 'rainbow_state',   key: 'spread',               url: '/rainbow/spread',      json: 'spread',             slider: 'rainbowSpread',     out: 'rainbowSpreadValue'},
+            {state: 'xms_state',       key: 'refractory_period',    url: '/xms/refractory',      json: 'value',              slider: 'xmsRefractory',     out: 'xmsRefractoryValue'},
+            {state: 'xms_state',       key: 'excitation_threshold', url: '/xms/threshold',       json: 'value',              slider: 'xmsThreshold',      out: 'xmsThresholdValue'},
+            {state: 'xms_state',       key: 'trigger_probability',  url: '/xms/trigger',         json: 'value',              slider: 'xmsTrigger',        out: 'xmsTriggerValue',      scale: 1000, decimals: 3},
+            {state: 'flame_state',     key: 'base_temp',            url: '/flame/base_temp',     json: 'value',              slider: 'flameBaseTemp',     out: 'flameBaseTempValue',   scale: 100,  decimals: 2},
+            {state: 'flame_state',     key: 'var_temp',             url: '/flame/var_temp',      json: 'value',              slider: 'flameVarTemp',      out: 'flameVarTempValue',    scale: 100,  decimals: 2},
+            {state: 'lava_state',      key: 'speed',                url: '/lava/speed',          json: 'value',              slider: 'lavaSpeed',         out: 'lavaSpeedValue'},
+            {state: 'lava_state',      key: 'size',                 url: '/lava/size',           json: 'value',              slider: 'lavaSize',          out: 'lavaSizeValue'},
+            {state: 'lava_state',      key: 'count',                url: '/lava/count',          json: 'value',              slider: 'lavaCount',         out: 'lavaCountValue'},
+            {state: 'lava_state',      key: 'color',                url: '/lava/color',          colour: 'lavaColor'},
+            {state: 'lava_state',      key: 'color_mode',           url: '/lava/mode',           json: 'mode',
+                mode: {solid: 'lavaSolidBtn', multi: 'lavaMultiBtn', rainbow: 'lavaRainbowBtn'},
+                effect: m => { document.getElementById('lavaColorPicker').style.display = (m === 'solid') ? 'block' : 'none'; }},
+            {state: 'ocean_state',     key: 'speed',                url: '/ocean/speed',         json: 'value',              slider: 'oceanSpeed',        out: 'oceanSpeedValue'},
+            {state: 'ocean_state',     key: 'height',               url: '/ocean/height',        json: 'value',              slider: 'oceanHeight',       out: 'oceanHeightValue'},
+            {state: 'spiral_state',    key: 'speed',                url: '/spiral/speed',        json: 'value',              slider: 'spiralSpeed',       out: 'spiralSpeedValue'},
+            {state: 'spiral_state',    key: 'radius',               url: '/spiral/radius',       json: 'value',              slider: 'spiralRadius',      out: 'spiralRadiusValue',    scale: 10,   decimals: 1},
+            {state: 'spiral_state',    key: 'fall_speed',           url: '/spiral/fall',         json: 'value',              slider: 'spiralFall',        out: 'spiralFallValue'},
+            {state: 'spiral_state',    key: 'color_speed',          url: '/spiral/color_speed',  json: 'value',              slider: 'spiralColorSpeed',  out: 'spiralColorSpeedValue'},
+            {state: 'spiral_state',    key: 'color',                url: '/spiral/color',        colour: 'spiralColor'},
+            {state: 'spiral_state',    key: 'color_mode',           url: '/spiral/mode',         json: 'mode',
+                mode: {rainbow: 'spiralRainbowBtn', solid: 'spiralSolidBtn'},
+                effect: m => { document.getElementById('spiralColorPicker').style.display = (m === 'solid') ? 'block' : 'none';
+                               document.getElementById('spiralRainbowSliders').classList.toggle('active', m === 'rainbow'); }},
+            {state: 'shimmer_state',   key: 'color',                url: '/shimmer/color',       colour: 'shimmerColor'},
+            {state: 'shimmer_state',   key: 'color2',               url: '/shimmer/color2',      colour: 'shimmerColor2'},
+            {state: 'shimmer_state',   key: 'intensity',            url: '/shimmer/intensity',   json: 'value',              slider: 'shimmerIntensity',  out: 'shimmerIntensityValue'},
+        ];
+
+        // Defaults come from the server (/cube/state), so they always match
+        // patterns.py. Until that call returns, Reset is a no-op.
+        let tuningDefaults = null;
+
+        function findTunable(state, key) {
+            return TUNABLES.find(t => t.state === state && t.key === key);
+        }
+
+        // Reflect a value in the UI without sending it
+        function showTunable(t, value) {
+            if (t.slider) {
+                const scale = t.scale || 1;
+                document.getElementById(t.slider).value = Math.round(value * scale);
+                document.getElementById(t.out).textContent =
+                    t.decimals ? Number(value).toFixed(t.decimals) : value;
+            } else if (t.colour) {
+                document.getElementById(t.colour).value = rgbToHex(value);
+            } else if (t.mode) {
+                for (const [m, id] of Object.entries(t.mode)) {
+                    document.getElementById(id).classList.toggle('active', m === value);
+                }
+                if (t.effect) t.effect(value);
+            }
+        }
+
+        // Send a value to the server
+        function sendTunable(t, value) {
+            let body;
+            if (t.colour) body = {red: value[0], green: value[1], blue: value[2]};
+            else body = {[t.json]: value};
+            return post(t.url, body).catch(() => {});
+        }
+
+        function sliderChanged(el) {
+            const t = findTunable(el.dataset.state, el.dataset.key);
+            const value = parseInt(el.value) / (t.scale || 1);
+            showTunable(t, value);
+            sendTunable(t, value);
+        }
+
+        function colourChanged(el) {
+            const t = findTunable(el.dataset.state, el.dataset.key);
+            const c = hexToRgb(el.value);
+            sendTunable(t, [c.red, c.green, c.blue]);
+        }
+
+        function setMode(state, key, value) {
+            const t = findTunable(state, key);
+            showTunable(t, value);
+            sendTunable(t, value);
+        }
+
+        function resetPattern(state) {
+            if (!tuningDefaults || !tuningDefaults[state]) return;
+            for (const t of TUNABLES) {
+                if (t.state !== state) continue;
+                const value = tuningDefaults[state][t.key];
+                if (value === undefined) continue;
+                showTunable(t, value);
+                sendTunable(t, value);
+            }
+        }
+
+        // ------------------------------------------------------------------
+        // Preview: draws the last frame the cube received
+        // ------------------------------------------------------------------
+        let previewTimer = null;
+
+        function togglePreview() {
+            const canvas = document.getElementById('previewCanvas');
+            const on = canvas.style.display === 'none';
+            canvas.style.display = on ? 'block' : 'none';
+            document.getElementById('previewBtn').textContent = on ? '👁️ Hide Preview' : '👁️ Show Preview';
+            if (on) {
+                refreshPreview();
+                previewTimer = setInterval(refreshPreview, 100);
+            } else {
+                clearInterval(previewTimer);
+                previewTimer = null;
+            }
+        }
+
+        function refreshPreview() {
+            fetch('/cube/frame').then(r => r.json()).then(data => {
+                drawFrame(data.frame);
+                document.getElementById('previewNote').textContent =
+                    data.hardware + ' cube' + (data.simulated ? ' (simulated - no I2C bus on this machine)' : '');
+            }).catch(() => {});
+        }
+
+        // Isometric view from the front-left, above. x = 0 (the Planes
+        // player's slice) is nearest the viewer, z is up.
+        function drawFrame(frame) {
+            const canvas = document.getElementById('previewCanvas');
+            const ctx = canvas.getContext('2d');
+            const W = canvas.width, H = canvas.height;
+            const s = 36;                       // pixels per cell
+            const cx = W / 2, cy = H / 2 + 50;
+            ctx.clearRect(0, 0, W, H);
+
+            const cells = [];
+            for (let x = 0; x < 5; x++)
+                for (let y = 0; y < 5; y++)
+                    for (let z = 0; z < 5; z++) {
+                        const i = (x * 25 + y * 5 + z) * 3;
+                        const xr = 4 - x;       // bring x = 0 to the front
+                        cells.push({
+                            sx: cx + (y - xr) * s * 0.866,
+                            sy: cy + (y + xr) * s * 0.5 - z * s,
+                            depth: xr + y, z: z,
+                            r: frame[i], g: frame[i + 1], b: frame[i + 2],
+                        });
+                    }
+            cells.sort((a, b) => (a.depth - b.depth) || (a.z - b.z));
+
+            for (const c of cells) {
+                const lit = (c.r + c.g + c.b) > 0;
+                ctx.beginPath();
+                ctx.arc(c.sx, c.sy, lit ? 7 : 3, 0, 2 * Math.PI);
+                if (lit) {
+                    ctx.shadowBlur = 12;
+                    ctx.shadowColor = `rgb(${c.r},${c.g},${c.b})`;
+                    ctx.fillStyle = `rgb(${c.r},${c.g},${c.b})`;
+                } else {
+                    ctx.shadowBlur = 0;
+                    ctx.fillStyle = '#2e2e2e';
+                }
+                ctx.fill();
+            }
+            ctx.shadowBlur = 0;
+
+            // Axis labels
+            ctx.fillStyle = '#666';
+            ctx.font = '12px Arial';
+            ctx.fillText('x', cx - 4 * s * 0.866 - 14, cy + 4 * s * 0.5 + 4);
+            ctx.fillText('y', cx + 4 * s * 0.866 + 6, cy + 4 * s * 0.5 + 4);
+            ctx.fillText('z', cx - 6, cy - 4 * s - 8);
+        }
+
+        // ------------------------------------------------------------------
         // Bluetooth controller bridge: one toggle button + a status line, polled
+        // ------------------------------------------------------------------
         let bridgeRunning = false;
 
         function showBridgeState(state) {
@@ -636,647 +921,63 @@
         }
 
         function toggleBridge() {
-            fetch(bridgeRunning ? '/bridge/stop' : '/bridge/start', {method: 'POST'})
-                .then(r => r.json())
-                .then(state => {
-                    if (state.status === 'error') {
-                        document.getElementById('bridgeStatus').textContent = 'Error: ' + state.message;
-                    } else {
-                        showBridgeState(state);
-                    }
+            post(bridgeRunning ? '/bridge/stop' : '/bridge/start')
+                .then(showBridgeState)
+                .catch(err => {
+                    document.getElementById('bridgeStatus').textContent = 'Error: ' + err.message;
                 });
         }
 
         refreshBridge();
         setInterval(refreshBridge, 3000);
 
-        // Brightness control - keeps both tab sliders (Control + Patterns) in sync
-        function updateBrightness(value) {
-            document.getElementById('brightnessValue').textContent = value;
-            document.getElementById('patternBrightnessValue').textContent = value;
-            document.getElementById('brightness').value = value;
-            document.getElementById('patternBrightness').value = value;
-            fetch('/cube/brightness', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({brightness: parseInt(value)})
-            });
+        // ------------------------------------------------------------------
+        // Games
+        // ------------------------------------------------------------------
+        let gameActive = false;
+        let gameLaunched = false;   // true from start until explicit stop (survives game-over)
+        let gameUpdateInterval = null;
+        let currentGame = 'planes';
+        let snakeActive = false;
+        let snakeLaunched = false;  // true from start until explicit stop (survives game-over)
+        let snakeUpdateInterval = null;
+        let meteorsActive = false;
+        let meteorsLaunched = false;  // true from start until explicit stop (survives game-over)
+        let meteorsUpdateInterval = null;
+
+        // Show one game's panel (UI only)
+        function showGamePanel(name) {
+            currentGame = name;
+            document.getElementById('planesGameBtn').classList.toggle('active', name === 'planes');
+            document.getElementById('snakeGameBtn').classList.toggle('active', name === 'snake');
+            document.getElementById('meteorsGameBtn').classList.toggle('active', name === 'meteors');
+            document.getElementById('planesGame').style.display = (name === 'planes') ? 'block' : 'none';
+            document.getElementById('snakeGame').style.display = (name === 'snake') ? 'block' : 'none';
+            document.getElementById('meteorsGame').style.display = (name === 'meteors') ? 'block' : 'none';
         }
 
-        // Pattern tab's slider just defers to the shared handler above
-        function updatePatternBrightness(value) {
-            updateBrightness(value);
+        // Switch between the games; stop whichever is currently running
+        function selectGame(name) {
+            if (name === currentGame) return;
+            if (gameActive || gameLaunched) stopGame();
+            if (snakeActive || snakeLaunched) stopSnake();
+            if (meteorsActive || meteorsLaunched) stopMeteors();
+            showGamePanel(name);
         }
 
-        // Color fill
-        function fillCube(color) {
-            const r = parseInt(color.substr(1,2), 16);
-            const g = parseInt(color.substr(3,2), 16);
-            const b = parseInt(color.substr(5,2), 16);
-
-            fetch('/cube/fill', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({red: r, green: g, blue: b})
-            });
-        }
-
-        // Quick color selection
-        function setColor(hex) {
-            document.getElementById('colorPicker').value = hex;
-            fillCube(hex);
-        }
-
-        // Turn off
-        function turnOff() {
-            fetch('/cube/off', {method: 'POST'});
-            if (currentPattern) {
-                document.querySelectorAll('.pattern-button').forEach(btn => {
-                    btn.classList.remove('active');
-                });
-                currentPattern = null;
-            }
-        }
-
-        // Shut down the Raspberry Pi itself (not just the cube)
-        function shutdownPi() {
-            if (!confirm('Shut down the Raspberry Pi? You will need to power-cycle it to use the cube again.')) {
-                return;
-            }
-            fetch('/system/shutdown', {method: 'POST'});
-            alert('Shutting down. Wait ~30 seconds before disconnecting power.');
-        }
-
-        // Pattern controls
-        function startPattern(patternName, buttonElement) {
-            // Visual feedback
-            document.querySelectorAll('.pattern-button').forEach(btn => {
-                btn.classList.remove('active');
-            });
-            if (buttonElement) {
-                buttonElement.classList.add('active');
-            }
-            currentPattern = patternName;
-
-            // Hide all pattern controls
-            document.getElementById('waveControls').classList.remove('active');
-            document.getElementById('rainControls').classList.remove('active');
-            document.getElementById('dripsControls').classList.remove('active');
-            document.getElementById('fireworksControls').classList.remove('active');
-            document.getElementById('rainbowControls').classList.remove('active');
-            document.getElementById('xmsControls').classList.remove('active');
-            document.getElementById('flameControls').classList.remove('active');
-            document.getElementById('lavaControls').classList.remove('active');
-            document.getElementById('oceanControls').classList.remove('active');
-            document.getElementById('spiralControls').classList.remove('active');
-            document.getElementById('shimmerControls').classList.remove('active');
-
-            // Show relevant controls
-            if (patternName === 'wave') {
-                document.getElementById('waveControls').classList.add('active');
-            } else if (patternName === 'rain') {
-                document.getElementById('rainControls').classList.add('active');
-            } else if (patternName === 'drips') {
-                document.getElementById('dripsControls').classList.add('active');
-            } else if (patternName === 'fireworks') {
-                document.getElementById('fireworksControls').classList.add('active');
-            } else if (patternName === 'rainbow') {
-                document.getElementById('rainbowControls').classList.add('active');
-            } else if (patternName === 'XMS') {
-                document.getElementById('xmsControls').classList.add('active');
-            } else if (patternName === 'flame') {
-                document.getElementById('flameControls').classList.add('active');
-            } else if (patternName === 'lava') {
-                document.getElementById('lavaControls').classList.add('active');
-            } else if (patternName === 'ocean') {
-                document.getElementById('oceanControls').classList.add('active');
-            } else if (patternName === 'spiral') {
-                document.getElementById('spiralControls').classList.add('active');
-            } else if (patternName === 'shimmer') {
-                document.getElementById('shimmerControls').classList.add('active');
-            }
-
-            fetch('/pattern/start', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({pattern: patternName})
-            });
-        }
-
-        function stopPattern() {
-            fetch('/pattern/stop', {method: 'POST'});
-            document.querySelectorAll('.pattern-button').forEach(btn => {
-                btn.classList.remove('active');
-            });
-            document.getElementById('waveControls').classList.remove('active');
-            document.getElementById('rainControls').classList.remove('active');
-            document.getElementById('dripsControls').classList.remove('active');
-            document.getElementById('fireworksControls').classList.remove('active');
-            document.getElementById('rainbowControls').classList.remove('active');
-            document.getElementById('xmsControls').classList.remove('active');
-            document.getElementById('flameControls').classList.remove('active');
-            document.getElementById('lavaControls').classList.remove('active');
-            document.getElementById('oceanControls').classList.remove('active');
-            document.getElementById('spiralControls').classList.remove('active');
-            document.getElementById('shimmerControls').classList.remove('active');
-            currentPattern = null;
-        }
-
-        // Wave pattern controls
-        function setWaveAxis(axis) {
-            document.getElementById('zAxisBtn').classList.remove('active');
-            document.getElementById('xAxisBtn').classList.remove('active');
-            document.getElementById(axis === 'x' ? 'xAxisBtn' : 'zAxisBtn').classList.add('active');
-
-            fetch('/wave/axis', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({axis: axis})
-            });
-        }
-
-        function setWaveMode(mode) {
-            document.getElementById('solidModeBtn').classList.remove('active');
-            document.getElementById('rainbowModeBtn').classList.remove('active');
-
-            if (mode === 'solid') {
-                document.getElementById('solidModeBtn').classList.add('active');
-                document.getElementById('waveColorPicker').style.display = 'block';
-                document.getElementById('waveRainbowSliders').classList.remove('active');
-            } else {
-                document.getElementById('rainbowModeBtn').classList.add('active');
-                document.getElementById('waveColorPicker').style.display = 'none';
-                document.getElementById('waveRainbowSliders').classList.add('active');
-            }
-
-            fetch('/wave/mode', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({mode: mode})
-            });
-        }
-
-        function setWaveColor(color) {
-            const r = parseInt(color.substr(1,2), 16);
-            const g = parseInt(color.substr(3,2), 16);
-            const b = parseInt(color.substr(5,2), 16);
-
-            fetch('/wave/color', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({red: r, green: g, blue: b})
-            });
-        }
-
-        function setWaveRainbowSpeed(value) {
-            document.getElementById('waveRainbowSpeedValue').textContent = value;
-            fetch('/wave/rainbow/speed', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({speed: parseInt(value)})
-            });
-        }
-
-        function setWaveRainbowSpread(value) {
-            document.getElementById('waveRainbowSpreadValue').textContent = value;
-            fetch('/wave/rainbow/spread', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({spread: parseInt(value)})
-            });
-        }
-
-        function setWaveSpeed(value) {
-            document.getElementById('waveSpeedValue').textContent = value;
-            fetch('/wave/speed', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({speed: parseInt(value)})
-            });
-        }
-
-        function setRainIntensity(value) {
-            document.getElementById('rainIntensityValue').textContent = value;
-            fetch('/rain/intensity', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({intensity: parseInt(value)})
-            });
-        }
-
-        function setDripsSpawn(value) {
-            document.getElementById('dripsSpawnValue').textContent = value;
-            fetch('/drips/spawn', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({spawn_chance: parseInt(value)})
-            });
-        }
-
-        function setFireworksLaunch(value) {
-            document.getElementById('fireworksLaunchValue').textContent = value;
-            fetch('/fireworks/launch', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({launch_probability: parseInt(value)})
-            });
-        }
-
-        function setFireworksMax(value) {
-            document.getElementById('fireworksMaxValue').textContent = value;
-            fetch('/fireworks/max', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({max_fireworks: parseInt(value)})
-            });
-        }
-
-        function setFireworksSize(value) {
-            document.getElementById('fireworksSizeValue').textContent = value;
-            fetch('/fireworks/size', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({explosion_size: parseInt(value)})
-            });
-        }
-
-        function setRainbowSpeed(value) {
-            document.getElementById('rainbowSpeedValue').textContent = value;
-            fetch('/rainbow/speed', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({speed: parseInt(value)})
-            });
-        }
-
-        function setRainbowSpread(value) {
-            document.getElementById('rainbowSpreadValue').textContent = value;
-            fetch('/rainbow/spread', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({spread: parseInt(value)})
-            });
-        }
-
-        // XMS simulation controls
-        function setXmsRefractory(value) {
-            document.getElementById('xmsRefractoryValue').textContent = value;
-            fetch('/xms/refractory', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({value: parseInt(value)})
-            });
-        }
-
-        function setXmsThreshold(value) {
-            document.getElementById('xmsThresholdValue').textContent = value;
-            fetch('/xms/threshold', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({value: parseInt(value)})
-            });
-        }
-
-        function setXmsTrigger(raw) {
-            // slider 1-100 maps to 0.001-0.100
-            const val = parseInt(raw) / 1000;
-            document.getElementById('xmsTriggerValue').textContent = val.toFixed(3);
-            fetch('/xms/trigger', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({value: val})
-            });
-        }
-
-        // Flame controls
-        function setFlameBaseTemp(raw) {
-            const val = parseInt(raw) / 100;
-            document.getElementById('flameBaseTempValue').textContent = val.toFixed(2);
-            fetch('/flame/base_temp', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({value: val})
-            });
-        }
-
-        function setFlameVarTemp(raw) {
-            const val = parseInt(raw) / 100;
-            document.getElementById('flameVarTempValue').textContent = val.toFixed(2);
-            fetch('/flame/var_temp', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({value: val})
-            });
-        }
-
-        // Lava lamp controls
-        function setLavaMode(mode) {
-            ['lavaSolidBtn', 'lavaMultiBtn', 'lavaRainbowBtn'].forEach(id => {
-                document.getElementById(id).classList.remove('active');
-            });
-            const btn = {solid: 'lavaSolidBtn', multi: 'lavaMultiBtn', rainbow: 'lavaRainbowBtn'}[mode];
-            document.getElementById(btn).classList.add('active');
-            document.getElementById('lavaColorPicker').style.display = (mode === 'solid') ? 'block' : 'none';
-
-            fetch('/lava/mode', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({mode: mode})
-            });
-        }
-
-        function setLavaColor(color) {
-            const r = parseInt(color.substr(1,2), 16);
-            const g = parseInt(color.substr(3,2), 16);
-            const b = parseInt(color.substr(5,2), 16);
-
-            fetch('/lava/color', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({red: r, green: g, blue: b})
-            });
-        }
-
-        function setLavaCount(value) {
-            document.getElementById('lavaCountValue').textContent = value;
-            fetch('/lava/count', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({value: parseInt(value)})
-            });
-        }
-
-        function setLavaSize(value) {
-            document.getElementById('lavaSizeValue').textContent = value;
-            fetch('/lava/size', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({value: parseInt(value)})
-            });
-        }
-
-        function setLavaSpeed(value) {
-            document.getElementById('lavaSpeedValue').textContent = value;
-            fetch('/lava/speed', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({value: parseInt(value)})
-            });
-        }
-
-        // Ocean controls
-        function setOceanSpeed(value) {
-            document.getElementById('oceanSpeedValue').textContent = value;
-            fetch('/ocean/speed', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({value: parseInt(value)})
-            });
-        }
-
-        function setOceanHeight(value) {
-            document.getElementById('oceanHeightValue').textContent = value;
-            fetch('/ocean/height', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({value: parseInt(value)})
-            });
-        }
-
-        // Spiral controls
-        function setSpiralMode(mode) {
-            document.getElementById('spiralSolidBtn').classList.remove('active');
-            document.getElementById('spiralRainbowBtn').classList.remove('active');
-
-            if (mode === 'solid') {
-                document.getElementById('spiralSolidBtn').classList.add('active');
-                document.getElementById('spiralColorPicker').style.display = 'block';
-                document.getElementById('spiralRainbowSliders').classList.remove('active');
-            } else {
-                document.getElementById('spiralRainbowBtn').classList.add('active');
-                document.getElementById('spiralColorPicker').style.display = 'none';
-                document.getElementById('spiralRainbowSliders').classList.add('active');
-            }
-
-            fetch('/spiral/mode', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({mode: mode})
-            });
-        }
-
-        function setSpiralColor(color) {
-            const r = parseInt(color.substr(1,2), 16);
-            const g = parseInt(color.substr(3,2), 16);
-            const b = parseInt(color.substr(5,2), 16);
-
-            fetch('/spiral/color', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({red: r, green: g, blue: b})
-            });
-        }
-
-        function setSpiralRadius(raw) {
-            // slider 5-20 maps to a radius of 0.5-2.0 cells
-            const val = parseInt(raw) / 10;
-            document.getElementById('spiralRadiusValue').textContent = val.toFixed(1);
-            fetch('/spiral/radius', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({value: val})
-            });
-        }
-
-        function setSpiralSpeed(value) {
-            document.getElementById('spiralSpeedValue').textContent = value;
-            fetch('/spiral/speed', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({value: parseInt(value)})
-            });
-        }
-
-        function setSpiralFall(value) {
-            document.getElementById('spiralFallValue').textContent = value;
-            fetch('/spiral/fall', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({value: parseInt(value)})
-            });
-        }
-
-        function setSpiralColorSpeed(value) {
-            document.getElementById('spiralColorSpeedValue').textContent = value;
-            fetch('/spiral/color_speed', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({value: parseInt(value)})
-            });
-        }
-
-        // Shimmer controls
-        function setShimmerColor(color) {
-            const r = parseInt(color.substr(1,2), 16);
-            const g = parseInt(color.substr(3,2), 16);
-            const b = parseInt(color.substr(5,2), 16);
-
-            fetch('/shimmer/color', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({red: r, green: g, blue: b})
-            });
-        }
-
-        function setShimmerColor2(color) {
-            const r = parseInt(color.substr(1,2), 16);
-            const g = parseInt(color.substr(3,2), 16);
-            const b = parseInt(color.substr(5,2), 16);
-
-            fetch('/shimmer/color2', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({red: r, green: g, blue: b})
-            });
-        }
-
-        function setShimmerIntensity(value) {
-            document.getElementById('shimmerIntensityValue').textContent = value;
-            fetch('/shimmer/intensity', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({value: parseInt(value)})
-            });
-        }
-
-        // Reset functions
-        function resetWave() {
-            document.getElementById('xAxisBtn').classList.remove('active');
-            document.getElementById('zAxisBtn').classList.add('active');
-            document.getElementById('solidModeBtn').classList.remove('active');
-            document.getElementById('rainbowModeBtn').classList.add('active');
-            document.getElementById('waveColorPicker').style.display = 'none';
-            document.getElementById('waveRainbowSliders').classList.add('active');
-            document.getElementById('waveColor').value = '#00FFFF';
-            document.getElementById('waveRainbowSpeed').value = 5; document.getElementById('waveRainbowSpeedValue').textContent = 5;
-            document.getElementById('waveRainbowSpread').value = 60; document.getElementById('waveRainbowSpreadValue').textContent = 60;
-            document.getElementById('waveSpeed').value = 3; document.getElementById('waveSpeedValue').textContent = 3;
-            fetch('/wave/axis', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({axis:'z'})});
-            fetch('/wave/mode', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mode:'rainbow'})});
-            fetch('/wave/color', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({red:0,green:255,blue:255})});
-            fetch('/wave/rainbow/speed', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({speed:5})});
-            fetch('/wave/rainbow/spread', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({spread:60})});
-            fetch('/wave/speed', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({speed:3})});
-        }
-
-        function resetRain() {
-            document.getElementById('rainIntensity').value = 5; document.getElementById('rainIntensityValue').textContent = 5;
-            fetch('/rain/intensity', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({intensity:5})});
-        }
-
-        function resetDrips() {
-            document.getElementById('dripsSpawn').value = 5; document.getElementById('dripsSpawnValue').textContent = 5;
-            fetch('/drips/spawn', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({spawn_chance:5})});
-        }
-
-        function resetFireworks() {
-            document.getElementById('fireworksLaunch').value = 4; document.getElementById('fireworksLaunchValue').textContent = 4;
-            document.getElementById('fireworksMax').value = 1; document.getElementById('fireworksMaxValue').textContent = 1;
-            document.getElementById('fireworksSize').value = 5; document.getElementById('fireworksSizeValue').textContent = 5;
-            fetch('/fireworks/launch', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({launch_probability:4})});
-            fetch('/fireworks/max', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({max_fireworks:1})});
-            fetch('/fireworks/size', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({explosion_size:5})});
-        }
-
-        function resetRainbow() {
-            document.getElementById('rainbowSpeed').value = 5; document.getElementById('rainbowSpeedValue').textContent = 5;
-            document.getElementById('rainbowSpread').value = 60; document.getElementById('rainbowSpreadValue').textContent = 60;
-            fetch('/rainbow/speed', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({speed:5})});
-            fetch('/rainbow/spread', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({spread:60})});
-        }
-
-        function resetXms() {
-            document.getElementById('xmsRefractory').value = 6; document.getElementById('xmsRefractoryValue').textContent = 6;
-            document.getElementById('xmsThreshold').value = 5; document.getElementById('xmsThresholdValue').textContent = 5;
-            document.getElementById('xmsTrigger').value = 3; document.getElementById('xmsTriggerValue').textContent = '0.003';
-            fetch('/xms/refractory', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({value:6})});
-            fetch('/xms/threshold', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({value:5})});
-            fetch('/xms/trigger', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({value:0.003})});
-        }
-
-        function resetFlame() {
-            document.getElementById('flameBaseTemp').value = 50; document.getElementById('flameBaseTempValue').textContent = '0.50';
-            document.getElementById('flameVarTemp').value = 50; document.getElementById('flameVarTempValue').textContent = '0.50';
-            fetch('/flame/base_temp', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({value:0.5})});
-            fetch('/flame/var_temp', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({value:0.5})});
-        }
-
-        function resetLava() {
-            document.getElementById('lavaSolidBtn').classList.add('active');
-            document.getElementById('lavaMultiBtn').classList.remove('active');
-            document.getElementById('lavaRainbowBtn').classList.remove('active');
-            document.getElementById('lavaColorPicker').style.display = 'block';
-            document.getElementById('lavaColor').value = '#FF2800';
-            document.getElementById('lavaCount').value = 3; document.getElementById('lavaCountValue').textContent = 3;
-            document.getElementById('lavaSize').value = 5; document.getElementById('lavaSizeValue').textContent = 5;
-            document.getElementById('lavaSpeed').value = 5; document.getElementById('lavaSpeedValue').textContent = 5;
-            fetch('/lava/mode', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mode:'solid'})});
-            fetch('/lava/color', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({red:255,green:40,blue:0})});
-            fetch('/lava/count', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({value:3})});
-            fetch('/lava/size', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({value:5})});
-            fetch('/lava/speed', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({value:5})});
-        }
-
-        function resetOcean() {
-            document.getElementById('oceanSpeed').value = 5; document.getElementById('oceanSpeedValue').textContent = 5;
-            document.getElementById('oceanHeight').value = 5; document.getElementById('oceanHeightValue').textContent = 5;
-            fetch('/ocean/speed', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({value:5})});
-            fetch('/ocean/height', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({value:5})});
-        }
-
-        function resetSpiral() {
-            document.getElementById('spiralSolidBtn').classList.remove('active');
-            document.getElementById('spiralRainbowBtn').classList.add('active');
-            document.getElementById('spiralColorPicker').style.display = 'none';
-            document.getElementById('spiralRainbowSliders').classList.add('active');
-            document.getElementById('spiralColor').value = '#0080FF';
-            document.getElementById('spiralRadius').value = 20; document.getElementById('spiralRadiusValue').textContent = '2.0';
-            document.getElementById('spiralSpeed').value = 5; document.getElementById('spiralSpeedValue').textContent = 5;
-            document.getElementById('spiralFall').value = 5; document.getElementById('spiralFallValue').textContent = 5;
-            document.getElementById('spiralColorSpeed').value = 5; document.getElementById('spiralColorSpeedValue').textContent = 5;
-            fetch('/spiral/mode', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mode:'rainbow'})});
-            fetch('/spiral/color', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({red:0,green:128,blue:255})});
-            fetch('/spiral/radius', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({value:2.0})});
-            fetch('/spiral/speed', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({value:5})});
-            fetch('/spiral/fall', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({value:5})});
-            fetch('/spiral/color_speed', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({value:5})});
-        }
-
-        function resetShimmer() {
-            document.getElementById('shimmerColor').value = '#0050C8';
-            document.getElementById('shimmerColor2').value = '#FFFFFF';
-            document.getElementById('shimmerIntensity').value = 5; document.getElementById('shimmerIntensityValue').textContent = 5;
-            fetch('/shimmer/color', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({red:0,green:80,blue:200})});
-            fetch('/shimmer/color2', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({red:255,green:255,blue:255})});
-            fetch('/shimmer/intensity', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({value:5})});
-        }
-
-        // Game controls
+        // Space Planes
         function startGame() {
-            fetch('/planes/start', {method: 'POST'})
-                .then(response => response.json())
-                .then(data => {
-                    gameActive = true;
-                    gameLaunched = true;
-                    gameScoreValue = 0;
-                    document.getElementById('gameScore').textContent = '0';
-                    document.getElementById('gameStatus').textContent = 'Playing...';
-                    document.getElementById('gameStatus').classList.remove('game-over');
+            post('/planes/start').then(() => beginPlanesUI()).catch(() => {});
+        }
 
-                    // Start polling for game state
-                    if (gameUpdateInterval) clearInterval(gameUpdateInterval);
-                    gameUpdateInterval = setInterval(updateGameState, 200);
-                });
+        function beginPlanesUI() {
+            gameActive = true;
+            gameLaunched = true;
+            document.getElementById('gameScore').textContent = '0';
+            document.getElementById('gameStatus').textContent = 'Playing...';
+            document.getElementById('gameStatus').classList.remove('game-over');
+            if (gameUpdateInterval) clearInterval(gameUpdateInterval);
+            gameUpdateInterval = setInterval(updateGameState, 200);
         }
 
         function stopGame() {
@@ -1288,22 +989,16 @@
                 clearInterval(gameUpdateInterval);
                 gameUpdateInterval = null;
             }
-            fetch('/planes/stop', {method: 'POST'});
+            post('/planes/stop').catch(() => {});
         }
 
         function movePlayer(direction) {
             if (!gameActive) return;
-
-            fetch('/planes/move', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({direction: direction})
-            });
+            post('/planes/move', {direction: direction}).catch(() => {});
         }
 
         function updateGameState() {
             if (!gameActive) return;
-
             fetch('/planes/state')
                 .then(response => response.json())
                 .then(data => {
@@ -1322,23 +1017,22 @@
                             gameUpdateInterval = null;
                         }
                     }
-                });
+                }).catch(() => {});
         }
 
-        // Snake controls
+        // Snake
         function startSnake() {
-            fetch('/snake/start', {method: 'POST'})
-                .then(response => response.json())
-                .then(data => {
-                    snakeActive = true;
-                    snakeLaunched = true;
-                    document.getElementById('snakeScore').textContent = '0';
-                    document.getElementById('snakeStatus').textContent = 'Playing...';
-                    document.getElementById('snakeStatus').classList.remove('game-over', 'game-won');
+            post('/snake/start').then(() => beginSnakeUI()).catch(() => {});
+        }
 
-                    if (snakeUpdateInterval) clearInterval(snakeUpdateInterval);
-                    snakeUpdateInterval = setInterval(updateSnakeState, 150);
-                });
+        function beginSnakeUI() {
+            snakeActive = true;
+            snakeLaunched = true;
+            document.getElementById('snakeScore').textContent = '0';
+            document.getElementById('snakeStatus').textContent = 'Playing...';
+            document.getElementById('snakeStatus').classList.remove('game-over', 'game-won');
+            if (snakeUpdateInterval) clearInterval(snakeUpdateInterval);
+            snakeUpdateInterval = setInterval(updateSnakeState, 150);
         }
 
         function stopSnake() {
@@ -1350,22 +1044,16 @@
                 clearInterval(snakeUpdateInterval);
                 snakeUpdateInterval = null;
             }
-            fetch('/snake/stop', {method: 'POST'});
+            post('/snake/stop').catch(() => {});
         }
 
         function moveSnake(direction) {
             if (!snakeActive) return;
-
-            fetch('/snake/move', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({direction: direction})
-            });
+            post('/snake/move', {direction: direction}).catch(() => {});
         }
 
         function updateSnakeState() {
             if (!snakeActive) return;
-
             fetch('/snake/state')
                 .then(response => response.json())
                 .then(data => {
@@ -1392,23 +1080,22 @@
                             snakeUpdateInterval = null;
                         }
                     }
-                });
+                }).catch(() => {});
         }
 
-        // Meteors controls
+        // Meteors
         function startMeteors() {
-            fetch('/meteors/start', {method: 'POST'})
-                .then(response => response.json())
-                .then(data => {
-                    meteorsActive = true;
-                    meteorsLaunched = true;
-                    document.getElementById('meteorsScore').textContent = '0';
-                    document.getElementById('meteorsStatus').textContent = 'Playing...';
-                    document.getElementById('meteorsStatus').classList.remove('game-over');
+            post('/meteors/start').then(() => beginMeteorsUI()).catch(() => {});
+        }
 
-                    if (meteorsUpdateInterval) clearInterval(meteorsUpdateInterval);
-                    meteorsUpdateInterval = setInterval(updateMeteorsState, 200);
-                });
+        function beginMeteorsUI() {
+            meteorsActive = true;
+            meteorsLaunched = true;
+            document.getElementById('meteorsScore').textContent = '0';
+            document.getElementById('meteorsStatus').textContent = 'Playing...';
+            document.getElementById('meteorsStatus').classList.remove('game-over');
+            if (meteorsUpdateInterval) clearInterval(meteorsUpdateInterval);
+            meteorsUpdateInterval = setInterval(updateMeteorsState, 200);
         }
 
         function stopMeteors() {
@@ -1420,23 +1107,17 @@
                 clearInterval(meteorsUpdateInterval);
                 meteorsUpdateInterval = null;
             }
-            fetch('/meteors/stop', {method: 'POST'});
+            post('/meteors/stop').catch(() => {});
         }
 
         // direction is 'up' / 'down' / 'left' / 'right', or 'fire' to shoot
         function moveMeteors(direction) {
             if (!meteorsActive) return;
-
-            fetch('/meteors/move', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({direction: direction})
-            });
+            post('/meteors/move', {direction: direction}).catch(() => {});
         }
 
         function updateMeteorsState() {
             if (!meteorsActive) return;
-
             fetch('/meteors/state')
                 .then(response => response.json())
                 .then(data => {
@@ -1455,7 +1136,7 @@
                             meteorsUpdateInterval = null;
                         }
                     }
-                });
+                }).catch(() => {});
         }
 
         // Keyboard controls - routed to whichever game is active
@@ -1506,53 +1187,77 @@
 
             switch(e.key) {
                 case 'ArrowUp':
-                case 'w':
-                case 'W':
-                    e.preventDefault();
-                    movePlayer('up');
-                    break;
+                case 'w': case 'W':
+                    e.preventDefault(); movePlayer('up'); break;
                 case 'ArrowDown':
-                case 's':
-                case 'S':
-                    e.preventDefault();
-                    movePlayer('down');
-                    break;
+                case 's': case 'S':
+                    e.preventDefault(); movePlayer('down'); break;
                 case 'ArrowLeft':
-                case 'a':
-                case 'A':
-                    e.preventDefault();
-                    movePlayer('left');
-                    break;
+                case 'a': case 'A':
+                    e.preventDefault(); movePlayer('left'); break;
                 case 'ArrowRight':
-                case 'd':
-                case 'D':
-                    e.preventDefault();
-                    movePlayer('right');
-                    break;
+                case 'd': case 'D':
+                    e.preventDefault(); movePlayer('right'); break;
             }
         });
 
-        // Load stored state on page load
+        // ------------------------------------------------------------------
+        // Sync the page with whatever the cube is actually doing. Runs on
+        // load, so a reload (or a second phone) shows the real brightness,
+        // the running pattern and its live tuning, or the game in progress.
+        // ------------------------------------------------------------------
+        function applyCubeState(state) {
+            tuningDefaults = state.defaults || tuningDefaults;
+
+            if (state.brightness !== undefined) {
+                const v = String(state.brightness);
+                document.getElementById('brightnessValue').textContent = v;
+                document.getElementById('patternBrightnessValue').textContent = v;
+                document.getElementById('brightness').value = v;
+                document.getElementById('patternBrightness').value = v;
+            }
+
+            if (state.tuning) {
+                for (const t of TUNABLES) {
+                    const dict = state.tuning[t.state];
+                    if (dict && dict[t.key] !== undefined) showTunable(t, dict[t.key]);
+                }
+            }
+
+            showPatternUI(state.pattern || null);
+
+            if (state.game) {
+                showGamePanel(state.game);
+                if (state.game === 'planes') beginPlanesUI();
+                else if (state.game === 'snake') beginSnakeUI();
+                else if (state.game === 'meteors') beginMeteorsUI();
+            }
+
+            // Open the tab for whatever is running, so its controls are to hand
+            if (state.game) openTab('games');
+            else if (state.pattern) openTab('patterns');
+        }
+
+        function openTab(tabName) {
+            const button = Array.from(document.querySelectorAll('.tab-button'))
+                .find(b => b.getAttribute('onclick').includes("'" + tabName + "'"));
+            if (button) switchTab(tabName, button);
+        }
+
         window.onload = function() {
+            setConnStatus('');
+            fetch('/cube/state').then(r => r.json()).then(applyCubeState)
+                .catch(() => setConnStatus('Cannot reach the cube server', true));
+
             // Show stored high scores before any game is started
-            fetch('/planes/state')
-                .then(response => response.json())
-                .then(data => {
-                    if (data.highscore !== undefined)
-                        document.getElementById('gameHighScore').textContent = data.highscore;
-                });
-            fetch('/snake/state')
-                .then(response => response.json())
-                .then(data => {
-                    if (data.highscore !== undefined)
-                        document.getElementById('snakeHighScore').textContent = data.highscore;
-                });
-            fetch('/meteors/state')
-                .then(response => response.json())
-                .then(data => {
-                    if (data.highscore !== undefined)
-                        document.getElementById('meteorsHighScore').textContent = data.highscore;
-                });
+            for (const [game, id] of [['planes', 'gameHighScore'], ['snake', 'snakeHighScore'], ['meteors', 'meteorsHighScore']]) {
+                fetch('/' + game + '/state')
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.highscore !== undefined)
+                            document.getElementById(id).textContent = data.highscore;
+                    }).catch(() => {});
+            }
         };
     </script>
 </body>

@@ -62,6 +62,7 @@ Dependencies (Pi):  pip install pyserial requests
 """
 
 import argparse
+import logging
 import sys
 import time
 
@@ -74,6 +75,12 @@ try:
     import requests
 except ImportError:
     requests = None
+
+# The server reads the tail of this script's log to show the link state in
+# the web UI (bridge_link_status in cube_MP_server.py), matching on the
+# phrases "Opening ", "Connected (", "Serial error" and "not found" - keep
+# those messages if you reword anything here.
+log = logging.getLogger('bridge')
 
 
 # ----- token -> action mapping --------------------------------------------
@@ -109,7 +116,9 @@ POLL_TIMEOUT = 0.5
 class Bridge:
     """Translates controller tokens into cube-server REST calls."""
 
-    def __init__(self, server, test=False, timeout=2.0):
+    def __init__(self, server, test=False, timeout=1.0):
+        # `timeout` bounds how long one POST may stall the input loop when the
+        # server is down; keep it short so buttons stay responsive.
         self.server = server.rstrip('/')
         self.test = test
         self.timeout = timeout
@@ -121,16 +130,15 @@ class Bridge:
     def _post(self, path, json=None):
         """POST to the cube server - or, in test mode, just describe the call."""
         if self.test:
-            print(f"    [test] would POST {path} {json if json else ''}".rstrip())
+            log.info("[test] would POST %s %s", path, json if json else '')
             return
         if requests is None:
-            print("    !! 'requests' not installed - cannot reach server "
-                  "(pip install requests)", file=sys.stderr)
+            log.error("'requests' not installed - cannot reach server (pip install requests)")
             return
         try:
             requests.post(self.server + path, json=json, timeout=self.timeout)
         except requests.RequestException as e:
-            print(f"    !! POST {path} failed: {e}", file=sys.stderr)
+            log.warning("POST %s failed: %s", path, e)
 
     def _get(self, path):
         """GET JSON from the cube server; None in test mode or on any failure."""
@@ -165,7 +173,7 @@ class Bridge:
         """Send the status line to the controller, but only when it changed."""
         line = self.display_line()
         if line != self.last_display:
-            print(f"> {line}")
+            log.info("> %s", line)
             ser.write((line + '\n').encode('utf-8'))
             self.last_display = line
 
@@ -180,7 +188,7 @@ class Bridge:
             if name in VALID_GAMES:
                 self.select_game(name)
             else:
-                print(f"  ? unknown game selection: {token!r}")
+                log.info("? unknown game selection: %r", token)
             return
 
         if token == 'start':
@@ -191,7 +199,7 @@ class Bridge:
             self.move(token)
             return
 
-        print(f"  ? unrecognised token: {token!r}")
+        log.info("? unrecognised token: %r", token)
 
     def select_game(self, name):
         # Switching selection stops any running game, like the web UI's tabs.
@@ -199,41 +207,41 @@ class Bridge:
             self._post(f'/{self.selected}/stop')
             self.running = False
         self.selected = name
-        print(f"  selected game -> {name}")
+        log.info("selected game -> %s", name)
 
     def start_selected(self):
-        print(f"  START {self.selected}")
+        log.info("START %s", self.selected)
         self._post(f'/{self.selected}/start')
         self.running = True
 
     def move(self, axis):
         if self.selected == 'snake':
-            print(f"  move snake {axis}")
+            log.info("move snake %s", axis)
             self._post('/snake/move', {'direction': axis})
         elif self.selected == 'meteors':
             if axis == 'nz':
-                print("  FIRE")
+                log.info("FIRE")
                 self._post('/meteors/fire')
                 return
             direction = METEORS_FROM_AXIS.get(axis)
             if direction is None:
-                print(f"  (meteors) ignoring {axis}")
+                log.info("(meteors) ignoring %s", axis)
                 return
-            print(f"  move meteors {direction}")
+            log.info("move meteors %s", direction)
             self._post('/meteors/move', {'direction': direction})
         else:  # planes
             direction = PLANES_FROM_AXIS.get(axis)
             if direction is None:
-                print(f"  (planes) ignoring {axis}")
+                log.info("(planes) ignoring %s", axis)
                 return
-            print(f"  move planes {direction}")
+            log.info("move planes %s", direction)
             self._post('/planes/move', {'direction': direction})
 
 
 def reader_loop(port, baud, bridge):
     """Open the serial port, feed decoded lines to the bridge, reconnect on drop."""
     if serial is None:
-        print("ERROR: pyserial not installed.  pip install pyserial", file=sys.stderr)
+        log.error("pyserial not installed.  pip install pyserial")
         return
 
     mode = "TEST MODE - server not contacted" if bridge.test \
@@ -241,11 +249,11 @@ def reader_loop(port, baud, bridge):
 
     while True:
         try:
-            print(f"Opening {port} ...")
+            log.info("Opening %s ...", port)
             with serial.Serial(port, baud, timeout=0.1) as ser:
-                print(f"Connected ({mode}).")
-                print(f"Selected game: {bridge.selected}.  Waiting for input "
-                      "(Ctrl+C to quit) ...")
+                log.info("Connected (%s).", mode)
+                log.info("Selected game: %s.  Waiting for input (Ctrl+C to quit) ...",
+                         bridge.selected)
                 bridge.last_display = None   # force a display refresh on (re)connect
                 next_poll = 0.0
                 buf = b''
@@ -264,15 +272,14 @@ def reader_loop(port, baud, bridge):
                     buf = b''
                     if not token:
                         continue
-                    print(f"< {token!r}")
+                    log.info("< %r", token)
                     bridge.handle(token)
                     next_poll = 0.0   # selection/start changes show up right away
         except serial.SerialException as e:
-            print(f"Serial error: {e}.  Retrying in 3s ...", file=sys.stderr)
+            log.warning("Serial error: %s.  Retrying in 3s ...", e)
             time.sleep(3)
         except FileNotFoundError:
-            print(f"{port} not found - did you 'rfcomm bind'?  Retrying in 3s ...",
-                  file=sys.stderr)
+            log.warning("%s not found - did you 'rfcomm bind'?  Retrying in 3s ...", port)
             time.sleep(3)
 
 
@@ -290,11 +297,13 @@ def main():
                          'the server (test the controller + Bluetooth on their own)')
     args = ap.parse_args()
 
+    logging.basicConfig(level=logging.INFO, stream=sys.stdout,
+                        format='%(asctime)s %(levelname)s %(message)s')
     bridge = Bridge(server=args.server, test=args.test)
     try:
         reader_loop(args.port, args.baud, bridge)
     except KeyboardInterrupt:
-        print("\nBye.")
+        log.info("Bye.")
 
 
 if __name__ == '__main__':

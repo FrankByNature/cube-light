@@ -1,9 +1,8 @@
 from flask import Flask, request, jsonify, render_template
-from flask_cors import CORS
-import smbus
 import multiprocessing
 import numpy as np
 import ctypes
+import logging
 import time
 import signal
 import sys
@@ -12,30 +11,60 @@ import random
 import json
 import os
 import subprocess
+import tempfile
+import traceback
 from queue import Empty
+
+log = logging.getLogger('cube')
+
+LOG_FORMAT = '%(asctime)s %(levelname)s %(name)s: %(message)s'
+
+def configure_logging():
+    """Called once per process (main and the spawned runner): under 'spawn'
+    the child starts with a fresh interpreter, so it needs its own config.
+    Output goes to stdout, which systemd captures in the journal."""
+    logging.basicConfig(level=logging.INFO, format=LOG_FORMAT, stream=sys.stdout, force=True)
+    # Werkzeug logs every request at INFO; that's noise next to the game polls
+    logging.getLogger('werkzeug').setLevel(logging.WARNING)
 
 # Persistent high scores, stored next to this script so it loads on startup
 HIGHSCORES_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'highscores.json')
+HIGHSCORE_GAMES = ('planes', 'snake', 'meteors')
 
 def load_highscores():
     """Read persisted high scores; return zeroed defaults if missing or corrupt."""
     try:
         with open(HIGHSCORES_FILE, 'r') as f:
             data = json.load(f)
-        return {'planes': int(data.get('planes', 0)), 'snake': int(data.get('snake', 0)),
-                'meteors': int(data.get('meteors', 0))}
-    except (FileNotFoundError, ValueError, OSError):
-        return {'planes': 0, 'snake': 0, 'meteors': 0}
+        return {g: int(data.get(g, 0)) for g in HIGHSCORE_GAMES}
+    except (FileNotFoundError, ValueError, TypeError, AttributeError, OSError):
+        return {g: 0 for g in HIGHSCORE_GAMES}
 
 def save_highscore(game, value):
-    """Persist one game's high score, preserving the other games' stored values."""
+    """Persist one game's high score, preserving the other games' stored values.
+
+    The file is written to a temporary name and renamed into place, so a
+    power cut mid-write leaves the previous file intact rather than a
+    truncated one (which load_highscores would read as all zeros)."""
     scores = load_highscores()
     scores[game] = int(value)
+    directory = os.path.dirname(HIGHSCORES_FILE)
     try:
-        with open(HIGHSCORES_FILE, 'w') as f:
-            json.dump(scores, f)
-    except OSError:
-        pass
+        fd, tmp_path = tempfile.mkstemp(prefix='.highscores-', suffix='.tmp', dir=directory)
+        try:
+            with os.fdopen(fd, 'w') as f:
+                json.dump(scores, f)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp_path, HIGHSCORES_FILE)
+        except Exception:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise
+    except OSError as e:
+        log.warning("Could not save high scores: %s", e)
 
 # Bluetooth controller bridge (game_controller_bridge.py), started/stopped from
 # the web UI. Only the main (Flask) process ever touches these; the bridge is a
@@ -81,14 +110,15 @@ def bridge_link_status():
             lines = f.read().decode('utf-8', errors='replace').splitlines()
     except OSError:
         return ''
+    # The bridge logs with a timestamp/level prefix, so match anywhere in the line
     for line in reversed(lines):
         if 'not found' in line:
             return 'No /dev/rfcomm0 - run rfcomm bind'
         if 'Serial error' in line:
             return 'Waiting for controller...'
-        if line.startswith('Connected'):
+        if 'Connected (' in line:
             return 'Controller connected'
-        if line.startswith('Opening'):
+        if 'Opening ' in line:
             return 'Connecting...'
     return ''
 
@@ -98,99 +128,14 @@ if __name__ == '__main__':
 
 import patterns
 import effects
+import cube_io
+# The I2C layer (bus, hardware detection, the two column-write mappings)
+# lives in cube_io.py and is shared with XYZ_test.py. Re-exported here so the
+# names stay available from this module.
+from cube_io import MINI, SIMULATED, send_to_cube, hardware_name
 
 # LED cube data structure
 leds = np.zeros((5, 5, 5, 3), dtype=np.int_)
-
-# Hardware select:
-#   True  -> always Mini cube (single board @ 0x20)
-#   False -> always Squid cube (five boards @ 0x21-0x25)
-#   None  -> auto-detect from the I2C bus at startup (probe both cubes)
-MINI_OVERRIDE = None
-
-# I2C Setup
-i2cbus = smbus.SMBus(1)
-mini_adrs = 0x20
-row_adrs = [0x21, 0x22, 0x23, 0x24, 0x25]
-
-def detect_hardware():
-    """Probe the I2C bus to decide which cube is attached.
-
-    The Mini cube answers at 0x20; the Squid cube answers at 0x21-0x25. These
-    don't overlap, so a quick (no-data) write to each address cleanly tells the
-    two apart. Returns True for Mini, False for Squid. Falls back to Squid if
-    nothing answers (e.g. cube unplugged) so the server still starts."""
-    def present(addr):
-        try:
-            i2cbus.write_quick(addr)   # SMBus quick command: just address + ACK
-            return True
-        except (OSError, IOError):
-            return False
-
-    if present(mini_adrs):
-        return True
-    if any(present(a) for a in row_adrs):
-        return False
-    if multiprocessing.current_process().name == 'MainProcess':
-        print("No cube detected on I2C - defaulting to Squid")
-    return False
-
-# Resolve the active hardware once at import. Under the 'spawn' start method
-# this runs in every process (main + each worker), since each re-imports this
-# module and needs its own I2C handle. The result is printed only from the main
-# process (see __main__) to avoid the same line appearing once per worker.
-MINI = MINI_OVERRIDE if MINI_OVERRIDE is not None else detect_hardware()
-
-def send_to_mini(led_data, brightness_val):
-    """Mini cube: single board at 0x20, register 5*x+y, serpentine z ordering."""
-    try:
-        b_val = brightness_val.value if hasattr(brightness_val, 'value') else brightness_val
-        for x in range(5):
-            for y in range(5):
-                payload = []
-                for z in range(5):
-                    if y % 2 == 0:
-                        pos = 4 - z
-                    else:
-                        pos = z
-                    r = int(led_data[x][pos][y][0] * b_val)
-                    g = int(led_data[x][pos][y][1] * b_val)
-                    b = int(led_data[x][pos][y][2] * b_val)
-                    r = max(0, min(255, r))
-                    g = max(0, min(255, g))
-                    b = max(0, min(255, b))
-                    payload.extend([r, g, b])
-                i2cbus.write_i2c_block_data(mini_adrs, (5*x + y), payload)
-    except Exception:
-        # Suppress I2C errors to prevent spamming console during fast switching
-        pass
-
-def send_to_squid(led_data, brightness_val):
-    """Squid cube: one board per layer at 0x21-0x25, register y."""
-    try:
-        b_val = brightness_val.value if hasattr(brightness_val, 'value') else brightness_val
-        for x in range(5):
-            for y in range(5):
-                payload = []
-                for z in range(5):
-                    r = int(led_data[x][y][4-z][0] * b_val)
-                    g = int(led_data[x][y][4-z][1] * b_val)
-                    b = int(led_data[x][y][4-z][2] * b_val)
-                    r = max(0, min(255, r))
-                    g = max(0, min(255, g))
-                    b = max(0, min(255, b))
-                    payload.extend([r, g, b])
-                i2cbus.write_i2c_block_data(row_adrs[x], y, payload)
-    except Exception:
-        # Suppress I2C errors to prevent spamming console during fast switching
-        pass
-
-def send_to_cube(led_data, brightness_val):
-    """Dispatch to the active hardware output, selected by the MINI flag."""
-    if MINI:
-        send_to_mini(led_data, brightness_val)
-    else:
-        send_to_squid(led_data, brightness_val)
 
 def hsv_to_rgb(h, s, v):
     h = h % 360
@@ -336,11 +281,11 @@ class PlanesGame:
         self.active = True
         self.score_value.value = 0
         self.game_over_value.value = False
-        print("Game started")
+        log.info("Planes started")
 
     def stop(self):
         self.active = False
-        print("Game stopped")
+        log.info("Planes stopped")
 
     def move(self, direction):
         if not self.active or self.game_over:
@@ -367,7 +312,7 @@ class PlanesGame:
         if self.score > self.highscore.value:
             self.highscore.value = self.score
             save_highscore('planes', self.score)
-        print(f"Game Over! Score: {self.score}")
+        log.info("Planes game over, score %d", self.score)
 
     def step(self, now):
         if not self.active:
@@ -594,11 +539,11 @@ class SnakeGame:
         self.score_value.value = 0
         self.game_over_value.value = False
         self.won_value.value = False
-        print("Snake started")
+        log.info("Snake started")
 
     def stop(self):
         self.active = False
-        print("Snake stopped")
+        log.info("Snake stopped")
 
     def move(self, direction):
         if not self.active or self.game_over:
@@ -627,9 +572,9 @@ class SnakeGame:
             self.highscore.value = self.score
             save_highscore('snake', self.score)
         if won:
-            print(f"Snake WINS - cube filled! Score: {self.score}")
+            log.info("Snake wins - cube filled, score %d", self.score)
         else:
-            print(f"Snake Game Over! Score: {self.score}")
+            log.info("Snake game over, score %d", self.score)
 
     def step(self, now):
         if not self.active:
@@ -714,6 +659,11 @@ class SnakeGame:
             purple_age = now - self.purple_spawn_time
             if purple_age >= self.PURPLE_LIFETIME:
                 self.purple_food = None
+                # Near a full cube the purple may have been holding the only
+                # free cell, leaving no red food on the board. Now that it has
+                # gone, put the red food back so the game can still be won.
+                if self.food is None and self._free_cells() > 0:
+                    self.food = self._spawn_food()
             elif purple_age > self.PURPLE_DIM_START:
                 # Linear fade to black over the last seconds
                 purple_fade = ((self.PURPLE_LIFETIME - purple_age)
@@ -839,11 +789,11 @@ class MeteorsGame:
         self.active = True
         self.score_value.value = 0
         self.game_over_value.value = False
-        print("Meteors started")
+        log.info("Meteors started")
 
     def stop(self):
         self.active = False
-        print("Meteors stopped")
+        log.info("Meteors stopped")
 
     def move(self, direction):
         if not self.active or self.game_over:
@@ -900,7 +850,7 @@ class MeteorsGame:
         if self.score > self.highscore.value:
             self.highscore.value = self.score
             save_highscore('meteors', self.score)
-        print(f"Meteors Game Over! Score: {self.score}")
+        log.info("Meteors game over, score %d", self.score)
 
     def step(self, now):
         if not self.active:
@@ -1007,28 +957,43 @@ class MeteorsGame:
 GAME_TICK = 0.02     # command-poll timeout while a game is active (~50 fps)
 IDLE_TIMEOUT = 0.25  # lazy poll otherwise; a queued command still wakes get() instantly
 
-def cube_runner(command_queue, brightness_value,
+FRAME_BYTES = 5 * 5 * 5 * 3   # size of the shared preview frame
+
+def cube_runner(command_queue, brightness_value, frame_shared,
                 planes_score, planes_game_over, planes_highscore,
                 snake_score, snake_game_over, snake_won, snake_highscore,
                 meteors_score, meteors_game_over, meteors_highscore):
     """Runs patterns (in a daemon thread) and games (stepped inline from the
     command loop). Everything that writes the cube lives in this one process,
-    so a pattern and a game can never interleave frames on the I2C bus."""
-    print("Cube runner started")
+    so a pattern and a game can never interleave frames on the I2C bus.
+
+    `frame_shared` is a multiprocessing Array of FRAME_BYTES uint8 that
+    receives a copy of every frame sent (brightness applied); the Flask
+    process serves it to the web UI's preview."""
+    configure_logging()
+    log.info("Cube runner started (%s cube%s)", hardware_name(),
+             ', simulated' if SIMULATED else '')
 
     leds_lock = threading.Lock()
     current_pattern_thread = None
 
     # Plain dict, not a multiprocessing.Value: the flag is only shared between
     # this loop and the pattern thread, which live in the same process.
-    pattern_running = {'value': False}
+    # 'gen' counts pattern starts so a crashed thread can tell whether it is
+    # still the current one before it clears the flag.
+    pattern_running = {'value': False, 'gen': 0}
 
     def check_running():
         return pattern_running['value']
 
+    preview = np.frombuffer(frame_shared.get_obj(), dtype=np.uint8)
+
     def safe_send(data, brightness):
         with leds_lock:
             send_to_cube(data, brightness)
+            # Mirror the frame for the UI preview. Cheap next to 25 I2C writes.
+            with frame_shared.get_lock():
+                preview[:] = cube_io.frame_bytes(data, brightness).ravel()
 
     games = {
         'planes': PlanesGame(leds, safe_send, brightness_value,
@@ -1041,9 +1006,8 @@ def cube_runner(command_queue, brightness_value,
     active_game = None
 
     def clear_cube():
-        with leds_lock:
-            leds[:] = 0
-            send_to_cube(leds, brightness_value.value)
+        leds[:] = 0
+        safe_send(leds, brightness_value.value)
 
     def stop_pattern_thread():
         nonlocal current_pattern_thread
@@ -1060,6 +1024,108 @@ def cube_runner(command_queue, brightness_value,
         if clear:
             clear_cube()
 
+    def run_pattern(name, func, gen):
+        """Thread target: run the pattern, and if it raises, log the traceback
+        and mark the pattern stopped so the runner doesn't keep believing one
+        is running (which would, for instance, stop brightness refreshes)."""
+        try:
+            func(leds, lambda data: safe_send(data, brightness_value), check_running, hsv_to_rgb)
+        except Exception:
+            log.error("Pattern '%s' crashed:\n%s", name, traceback.format_exc())
+            if pattern_running['gen'] == gen:
+                pattern_running['value'] = False
+
+    def start_pattern(name):
+        nonlocal current_pattern_thread
+        log.info("Starting pattern: %s", name)
+        pattern_running['gen'] += 1
+        pattern_running['value'] = True
+        current_pattern_thread = threading.Thread(
+            target=run_pattern,
+            args=(name, patterns.PATTERNS[name], pattern_running['gen']),
+            daemon=True,   # dies with the process
+        )
+        current_pattern_thread.start()
+
+    def drain_commands(first):
+        """Collect every command already queued behind `first`, dropping all
+        but the last 'brightness' refresh. The slider posts one command per
+        step while it is dragged, and each refresh of a static cube is a full
+        frame on the bus, so without this a drag could queue seconds of work
+        ahead of the next command."""
+        batch = [first]
+        while True:
+            try:
+                batch.append(command_queue.get_nowait())
+            except Empty:
+                break
+        last_brightness = max((i for i, c in enumerate(batch) if c['type'] == 'brightness'),
+                              default=None)
+        return [c for i, c in enumerate(batch)
+                if c['type'] != 'brightness' or i == last_brightness]
+
+    def handle(cmd):
+        nonlocal active_game
+        ctype = cmd['type']
+
+        if ctype == 'stop':
+            # Stop everything: pattern and game alike
+            stop_pattern_thread()
+            stop_active_game(clear=cmd.get('clear', True))
+
+        elif ctype == 'pattern':
+            pattern_name = cmd['pattern']
+            if pattern_name in patterns.PATTERNS:
+                stop_pattern_thread()
+                stop_active_game(clear=False)
+                start_pattern(pattern_name)
+            else:
+                log.warning("Unknown pattern requested: %r", pattern_name)
+
+        elif ctype == 'fill':
+            stop_pattern_thread()
+            stop_active_game(clear=False)
+            leds[:, :, :] = [cmd['r'], cmd['g'], cmd['b']]
+            safe_send(leds, brightness_value.value)
+
+        elif ctype == 'brightness':
+            # Patterns and games re-send every frame with live brightness;
+            # only a static display needs an explicit refresh.
+            if not pattern_running['value'] and active_game is None:
+                safe_send(leds, brightness_value.value)
+
+        elif ctype == 'tune':
+            # Generic live-tuning: set patterns.<state>[<key>] = <value>.
+            # Routes are generated from the tunable tables (see create_flask_app);
+            # the value may be a number, an [r, g, b] list or a mode string.
+            getattr(patterns, cmd['state'])[cmd['key']] = cmd['value']
+
+        elif ctype == 'game_start':
+            name = cmd['game']
+            if name in games:
+                stop_pattern_thread()
+                stop_active_game(clear=False)
+                games[name].start()
+                active_game = name
+            else:
+                log.warning("Unknown game requested: %r", name)
+
+        elif ctype == 'game_stop':
+            if active_game == cmd['game']:
+                stop_active_game(clear=cmd.get('clear', True))
+            elif (active_game is None and not pattern_running['value']
+                    and cmd.get('clear', True)):
+                # The game already ended its own death animation; just make
+                # sure the cube is dark.
+                clear_cube()
+
+        elif ctype == 'game_move':
+            if active_game == cmd['game']:
+                games[active_game].move(cmd['direction'])
+
+        else:
+            log.warning("Unknown command: %r", cmd)
+
     while True:
         # Block until a command arrives. While a game is active, wake at the
         # game tick rate so it keeps animating; otherwise poll lazily (the
@@ -1071,105 +1137,116 @@ def cube_runner(command_queue, brightness_value,
             cmd = None
 
         if cmd is not None:
-            ctype = cmd['type']
-
-            if ctype == 'stop':
-                # Stop everything: pattern and game alike
-                stop_pattern_thread()
-                stop_active_game(clear=cmd.get('clear', True))
-
-            elif ctype == 'pattern':
-                stop_pattern_thread()
-                stop_active_game(clear=False)
-
-                pattern_name = cmd['pattern']
-                if pattern_name in patterns.PATTERNS:
-                    print(f"Starting pattern: {pattern_name}")
-                    pattern_running['value'] = True
-                    current_pattern_thread = threading.Thread(
-                        target=patterns.PATTERNS[pattern_name],
-                        args=(
-                            leds,
-                            lambda data: safe_send(data, brightness_value),
-                            check_running,
-                            hsv_to_rgb
-                        ),
-                        daemon=True  # Ensure thread dies if main process dies
-                    )
-                    current_pattern_thread.start()
-
-            elif ctype == 'fill':
-                stop_pattern_thread()
-                stop_active_game(clear=False)
-                with leds_lock:
-                    leds[:, :, :] = [cmd['r'], cmd['g'], cmd['b']]
-                    send_to_cube(leds, brightness_value.value)
-
-            elif ctype == 'brightness':
-                # Patterns and games re-send every frame with live brightness;
-                # only a static display needs an explicit refresh.
-                if not pattern_running['value'] and active_game is None:
-                    with leds_lock:
-                        send_to_cube(leds, brightness_value.value)
-
-            elif ctype == 'wave_color':
-                patterns.wave_state['color'] = [cmd['r'], cmd['g'], cmd['b']]
-
-            elif ctype == 'wave_mode':
-                patterns.wave_state['color_mode'] = cmd['mode']
-
-            elif ctype == 'wave_axis':
-                patterns.wave_state['axis'] = cmd['axis']
-
-            elif ctype == 'tune':
-                # Generic live-tuning: set patterns.<state>[<key>] = <value>.
-                # Routes are generated from the TUNABLES table (see create_flask_app).
-                getattr(patterns, cmd['state'])[cmd['key']] = cmd['value']
-
-            elif ctype == 'game_start':
-                stop_pattern_thread()
-                stop_active_game(clear=False)
-                name = cmd['game']
-                if name in games:
-                    games[name].start()
-                    active_game = name
-
-            elif ctype == 'game_stop':
-                if active_game == cmd['game']:
-                    stop_active_game(clear=cmd.get('clear', True))
-                elif (active_game is None and not pattern_running['value']
-                        and cmd.get('clear', True)):
-                    # The game already ended its own death animation; just make
-                    # sure the cube is dark.
-                    clear_cube()
-
-            elif ctype == 'game_move':
-                if active_game == cmd['game']:
-                    games[active_game].move(cmd['direction'])
+            for queued in drain_commands(cmd):
+                try:
+                    handle(queued)
+                except Exception:
+                    # A malformed command must not take the whole runner down
+                    log.error("Command %r failed:\n%s", queued, traceback.format_exc())
 
         if active_game is not None:
             game = games[active_game]
-            game.step(time.time())
+            try:
+                game.step(time.time())
+            except Exception:
+                log.error("Game '%s' crashed:\n%s", active_game, traceback.format_exc())
+                game.active = False
+                game.stop()
+                clear_cube()
             if not game.active:
-                # The game finished its own game-over animation
+                # The game finished its own game-over animation (or crashed)
                 active_game = None
 
 
-def create_flask_app(command_queue, brightness_value,
+# Names of the per-pattern state dicts in patterns.py, in UI order. /cube/state
+# reports all of them so a freshly loaded page can show the live values.
+PATTERN_STATES = ('wave_state', 'rainbow_state', 'rain_state', 'drips_state',
+                  'fireworks_state', 'xms_state', 'flame_state', 'lava_state',
+                  'ocean_state', 'spiral_state', 'shimmer_state')
+
+# Snapshot of the defaults as written in patterns.py, taken before anything
+# can tune them. The UI's "Reset to Defaults" buttons use these.
+PATTERN_DEFAULTS = {name: json.loads(json.dumps(getattr(patterns, name)))
+                    for name in PATTERN_STATES}
+
+# A shutdown request must carry this header. Browsers refuse to attach a
+# custom header to a cross-origin request without a CORS preflight, and this
+# server answers no preflights, so a web page from another origin can't
+# trigger it - only our own page (or a deliberate curl) can.
+SHUTDOWN_HEADER = 'X-Cube-Confirm'
+SHUTDOWN_HEADER_VALUE = 'shutdown'
+
+
+def create_flask_app(command_queue, brightness_value, frame_shared,
                      planes_score, planes_game_over, planes_highscore,
                      snake_score, snake_game_over, snake_won, snake_highscore,
                      meteors_score, meteors_game_over, meteors_highscore,
                      initial_brightness=100):
     app = Flask(__name__)
-    CORS(app)
+    # Deliberately no CORS: the UI is served from this same origin and the
+    # controller bridge is not a browser, so nothing legitimate needs it.
+    # Leaving it off means other web sites can't read responses from the cube.
+
+    # What the UI needs to know on load, mirrored here from the commands this
+    # process has queued (every client, including the bridge, goes through
+    # these routes). Tuning values are mirrored into this process's own copy
+    # of the patterns.* dicts, which otherwise sit at their defaults.
+    ui_state = {'pattern': None, 'game': None}
+    game_over_values = {'planes': planes_game_over, 'snake': snake_game_over,
+                        'meteors': meteors_game_over}
+
+    def body():
+        """The JSON body as a dict, or {} for a missing / non-JSON body."""
+        return request.get_json(silent=True) or {}
+
+    def note_pattern(name):
+        ui_state['pattern'] = name
+        ui_state['game'] = None
+
+    def note_game(name):
+        ui_state['game'] = name
+        ui_state['pattern'] = None
+
+    def note_stopped():
+        ui_state['pattern'] = None
+        ui_state['game'] = None
+
+    def current_game():
+        game = ui_state['game']
+        if game is not None and game_over_values[game].value:
+            return None   # it ended on its own; the runner has dropped it
+        return game
 
     @app.route('/')
     def index():
         return render_template('index.html', initial_brightness=initial_brightness)
 
+    @app.route('/cube/state', methods=['GET'])
+    def get_cube_state():
+        """Everything a page needs to sync itself on load."""
+        return jsonify({
+            'brightness': int(round(brightness_value.value * 100)),
+            'pattern': ui_state['pattern'],
+            'game': current_game(),
+            'patterns': list(patterns.PATTERNS),
+            'hardware': hardware_name(),
+            'simulated': SIMULATED,
+            'tuning': {name: getattr(patterns, name) for name in PATTERN_STATES},
+            'defaults': PATTERN_DEFAULTS,
+        })
+
+    @app.route('/cube/frame', methods=['GET'])
+    def get_cube_frame():
+        """The last frame sent to the cube (brightness applied), 375 bytes in
+        x, y, z, RGB order, for the preview panel."""
+        with frame_shared.get_lock():
+            frame = bytes(frame_shared.get_obj())
+        return jsonify({'frame': list(frame), 'hardware': hardware_name(),
+                        'simulated': SIMULATED})
+
     @app.route('/cube/brightness', methods=['POST'])
     def set_brightness():
-        data = request.json or {}
+        data = body()
         try:
             brightness = int(data.get('brightness', 100))
         except (TypeError, ValueError):
@@ -1187,11 +1264,12 @@ def create_flask_app(command_queue, brightness_value,
 
     @app.route('/cube/fill', methods=['POST'])
     def fill_cube():
-        data = request.json or {}
+        data = body()
         red = _clamp_channel(data.get('red', 0))
         green = _clamp_channel(data.get('green', 0))
         blue = _clamp_channel(data.get('blue', 0))
 
+        note_stopped()
         command_queue.put({
             'type': 'fill',
             'r': red,
@@ -1203,26 +1281,35 @@ def create_flask_app(command_queue, brightness_value,
 
     @app.route('/cube/off', methods=['POST'])
     def turn_off():
+        note_stopped()
         command_queue.put({'type': 'stop'})
         return jsonify({'status': 'off'})
 
     @app.route('/system/shutdown', methods=['POST'])
     def shutdown_pi():
+        if request.headers.get(SHUTDOWN_HEADER) != SHUTDOWN_HEADER_VALUE:
+            return jsonify({'status': 'error',
+                            'message': f'missing {SHUTDOWN_HEADER} header'}), 403
         # Clear the cube before the Pi goes down; SIGTERM handler in __main__
         # does the same on `systemctl stop`, but shutdown is triggered by us here.
+        log.warning("Shutdown requested from %s", request.remote_addr)
+        note_stopped()
         command_queue.put({'type': 'stop'})
         try:
-            subprocess.Popen(['sudo', 'shutdown', '-h', 'now'])
+            subprocess.Popen(['sudo', '-n', 'shutdown', '-h', 'now'])
         except OSError as e:
             return jsonify({'status': 'error', 'message': str(e)}), 500
         return jsonify({'status': 'shutting down'})
 
     @app.route('/pattern/start', methods=['POST'])
     def start_pattern_route():
-        data = request.json
-        pattern_name = data.get('pattern')
+        pattern_name = body().get('pattern')
+        if pattern_name not in patterns.PATTERNS:
+            return jsonify({'status': 'error', 'message': f'unknown pattern {pattern_name!r}',
+                            'patterns': list(patterns.PATTERNS)}), 400
 
         # cube_runner stops any running game itself before starting the pattern
+        note_pattern(pattern_name)
         command_queue.put({
             'type': 'pattern',
             'pattern': pattern_name
@@ -1232,50 +1319,15 @@ def create_flask_app(command_queue, brightness_value,
 
     @app.route('/pattern/stop', methods=['POST'])
     def stop_pattern_route():
+        note_stopped()
         command_queue.put({'type': 'stop'})
         return jsonify({'status': 'stopped'})
 
-    @app.route('/wave/color', methods=['POST'])
-    def set_wave_color():
-        data = request.json
-        red = data.get('red', 0)
-        green = data.get('green', 0)
-        blue = data.get('blue', 0)
-
-        command_queue.put({
-            'type': 'wave_color',
-            'r': red,
-            'g': green,
-            'b': blue
-        })
-
-        return jsonify({'status': 'success', 'color': {'r': red, 'g': green, 'b': blue}})
-
-    @app.route('/wave/mode', methods=['POST'])
-    def set_wave_mode():
-        data = request.json
-        mode = data.get('mode', 'solid')
-
-        command_queue.put({
-            'type': 'wave_mode',
-            'mode': mode
-        })
-
-        return jsonify({'status': 'success', 'mode': mode})
-
-    @app.route('/wave/axis', methods=['POST'])
-    def set_wave_axis():
-        data = request.json
-        axis = data.get('axis', 'z')
-        if axis not in ('x', 'z'):
-            axis = 'z'
-
-        command_queue.put({
-            'type': 'wave_axis',
-            'axis': axis
-        })
-
-        return jsonify({'status': 'success', 'axis': axis})
+    def tune(state_attr, state_key, value):
+        """Queue a live-tuning change and mirror it locally for /cube/state."""
+        getattr(patterns, state_attr)[state_key] = value
+        command_queue.put({'type': 'tune', 'state': state_attr,
+                           'key': state_key, 'value': value})
 
     # ------------------------------------------------------------------
     # Live pattern-tuning routes, generated from one table.
@@ -1316,14 +1368,13 @@ def create_flask_app(command_queue, brightness_value,
     def make_tunable_route(json_key, state_attr, state_key, default, lo, hi):
         cast = float if isinstance(default, float) else int
         def handler():
-            data = request.json or {}
+            data = body()
             try:
                 value = cast(data.get(json_key, default))
             except (TypeError, ValueError):
                 value = default
             value = max(lo, min(hi, value))   # clamp to the slider's range
-            command_queue.put({'type': 'tune', 'state': state_attr,
-                               'key': state_key, 'value': value})
+            tune(state_attr, state_key, value)
             return jsonify({'status': 'success', json_key: value})
         return handler
 
@@ -1340,37 +1391,38 @@ def create_flask_app(command_queue, brightness_value,
     # [r, g, b] list or a mode string needs no extra branch there.
     # Colour: (url, patterns_state_attr, state_key); body is {red, green, blue}.
     COLOUR_TUNABLES = [
-        ('/lava/color',   'lava_state',   'color'),
-        ('/spiral/color', 'spiral_state', 'color'),
+        ('/wave/color',     'wave_state',    'color'),
+        ('/lava/color',     'lava_state',    'color'),
+        ('/spiral/color',   'spiral_state',  'color'),
         ('/shimmer/color',  'shimmer_state', 'color'),
         ('/shimmer/color2', 'shimmer_state', 'color2'),
     ]
 
     # Mode: (url, json_key, state_attr, state_key, allowed values, default)
     MODE_TUNABLES = [
+        ('/wave/mode',   'mode', 'wave_state',   'color_mode', ('solid', 'rainbow'),          'rainbow'),
+        ('/wave/axis',   'axis', 'wave_state',   'axis',       ('x', 'z'),                    'z'),
         ('/lava/mode',   'mode', 'lava_state',   'color_mode', ('solid', 'multi', 'rainbow'), 'solid'),
         ('/spiral/mode', 'mode', 'spiral_state', 'color_mode', ('solid', 'rainbow'),          'rainbow'),
     ]
 
     def make_colour_route(state_attr, state_key):
         def handler():
-            data = request.json or {}
+            data = body()
             colour = [_clamp_channel(data.get('red', 0)),
                       _clamp_channel(data.get('green', 0)),
                       _clamp_channel(data.get('blue', 0))]
-            command_queue.put({'type': 'tune', 'state': state_attr,
-                               'key': state_key, 'value': colour})
+            tune(state_attr, state_key, colour)
             return jsonify({'status': 'success', 'color': colour})
         return handler
 
     def make_mode_route(json_key, state_attr, state_key, allowed, default):
         def handler():
-            data = request.json or {}
+            data = body()
             mode = data.get(json_key, default)
             if mode not in allowed:
                 mode = default
-            command_queue.put({'type': 'tune', 'state': state_attr,
-                               'key': state_key, 'value': mode})
+            tune(state_attr, state_key, mode)
             return jsonify({'status': 'success', json_key: mode})
         return handler
 
@@ -1392,20 +1444,23 @@ def create_flask_app(command_queue, brightness_value,
 
     # Game routes. cube_runner enforces mutual exclusion (starting one game or
     # a pattern stops whatever else is running), so routes just queue commands.
+    # The URLs are also the controller bridge's API - don't rename them.
     @app.route('/planes/start', methods=['POST'])
     def start_planes():
+        note_game('planes')
         command_queue.put({'type': 'game_start', 'game': 'planes'})
         return jsonify({'status': 'started'})
 
     @app.route('/planes/stop', methods=['POST'])
     def stop_planes():
+        if ui_state['game'] == 'planes':
+            note_stopped()
         command_queue.put({'type': 'game_stop', 'game': 'planes'})
         return jsonify({'status': 'stopped'})
 
     @app.route('/planes/move', methods=['POST'])
     def move_planes():
-        data = request.json or {}
-        direction = data.get('direction')
+        direction = body().get('direction')
         command_queue.put({'type': 'game_move', 'game': 'planes', 'direction': direction})
         return jsonify({'status': 'moved', 'direction': direction})
 
@@ -1417,18 +1472,20 @@ def create_flask_app(command_queue, brightness_value,
     # Snake game routes
     @app.route('/snake/start', methods=['POST'])
     def start_snake():
+        note_game('snake')
         command_queue.put({'type': 'game_start', 'game': 'snake'})
         return jsonify({'status': 'started'})
 
     @app.route('/snake/stop', methods=['POST'])
     def stop_snake():
+        if ui_state['game'] == 'snake':
+            note_stopped()
         command_queue.put({'type': 'game_stop', 'game': 'snake'})
         return jsonify({'status': 'stopped'})
 
     @app.route('/snake/move', methods=['POST'])
     def move_snake():
-        data = request.json or {}
-        direction = data.get('direction')
+        direction = body().get('direction')
         command_queue.put({'type': 'game_move', 'game': 'snake', 'direction': direction})
         return jsonify({'status': 'moved', 'direction': direction})
 
@@ -1441,18 +1498,20 @@ def create_flask_app(command_queue, brightness_value,
     # is a shortcut for clients that want a dedicated button endpoint.
     @app.route('/meteors/start', methods=['POST'])
     def start_meteors():
+        note_game('meteors')
         command_queue.put({'type': 'game_start', 'game': 'meteors'})
         return jsonify({'status': 'started'})
 
     @app.route('/meteors/stop', methods=['POST'])
     def stop_meteors():
+        if ui_state['game'] == 'meteors':
+            note_stopped()
         command_queue.put({'type': 'game_stop', 'game': 'meteors'})
         return jsonify({'status': 'stopped'})
 
     @app.route('/meteors/move', methods=['POST'])
     def move_meteors():
-        data = request.json or {}
-        direction = data.get('direction')
+        direction = body().get('direction')
         command_queue.put({'type': 'game_move', 'game': 'meteors', 'direction': direction})
         return jsonify({'status': 'moved', 'direction': direction})
 
@@ -1491,6 +1550,7 @@ def create_flask_app(command_queue, brightness_value,
     return app
 
 if __name__ == '__main__':
+    configure_logging()
     INITIAL_BRIGHTNESS = 100
 
     # Create shared objects (only what actually crosses the process boundary:
@@ -1498,6 +1558,7 @@ if __name__ == '__main__':
     ctx = multiprocessing.get_context('spawn')
     command_queue = ctx.Queue()
     brightness_value = ctx.Value(ctypes.c_double, INITIAL_BRIGHTNESS / 100.0)
+    frame_shared = ctx.Array(ctypes.c_uint8, FRAME_BYTES)   # last frame, for the preview
     planes_score = ctx.Value(ctypes.c_int, 0)
     planes_game_over = ctx.Value(ctypes.c_bool, False)
     snake_score = ctx.Value(ctypes.c_int, 0)
@@ -1511,49 +1572,75 @@ if __name__ == '__main__':
     planes_highscore = ctx.Value(ctypes.c_int, saved_highscores['planes'])
     snake_highscore = ctx.Value(ctypes.c_int, saved_highscores['snake'])
     meteors_highscore = ctx.Value(ctypes.c_int, saved_highscores['meteors'])
-    print(f"Loaded high scores - Planes: {saved_highscores['planes']}, "
-          f"Snake: {saved_highscores['snake']}, Meteors: {saved_highscores['meteors']}")
+    log.info("Loaded high scores - Planes: %d, Snake: %d, Meteors: %d",
+             saved_highscores['planes'], saved_highscores['snake'], saved_highscores['meteors'])
 
-    print(f"Hardware: {'Mini' if MINI else 'Squid'} cube")
-    print("Starting LED Cube Controller...")
-    print("Main process: Flask web server on port 5000")
-    print("Child process: cube runner (patterns + games)")
+    log.info("Hardware: %s cube%s", hardware_name(),
+             ' (SIMULATED - no I2C bus; frames go to the web preview only)' if SIMULATED else '')
+    log.info("Starting LED Cube Controller: Flask on port 5000, cube runner as child process")
 
     cube_process = ctx.Process(target=cube_runner, args=(
-        command_queue, brightness_value,
+        command_queue, brightness_value, frame_shared,
         planes_score, planes_game_over, planes_highscore,
         snake_score, snake_game_over, snake_won, snake_highscore,
         meteors_score, meteors_game_over, meteors_highscore))
     cube_process.start()
 
-    app = create_flask_app(command_queue, brightness_value,
+    app = create_flask_app(command_queue, brightness_value, frame_shared,
                            planes_score, planes_game_over, planes_highscore,
                            snake_score, snake_game_over, snake_won, snake_highscore,
                            meteors_score, meteors_game_over, meteors_highscore,
                            INITIAL_BRIGHTNESS)
 
+    shutting_down = threading.Event()
+
     def cleanup():
-        print("\nShutting down...")
+        # Runs once. No lock here: a signal handler can re-enter this on the
+        # main thread (systemd and `timeout` both send repeated SIGTERMs), and a
+        # non-reentrant lock would deadlock it.
+        if shutting_down.is_set():
+            return
+        shutting_down.set()
+        log.info("Shutting down...")
         stop_bridge()
-        cube_process.terminate()
+        if cube_process.is_alive():
+            cube_process.terminate()
         cube_process.join(timeout=2)
         try:
             leds[:] = 0
             send_to_cube(leds, 1.0)
         except Exception:
             pass
-        print("Server stopped")
+        log.info("Server stopped")
 
     def signal_handler(sig, frame):
+        # Ignore any further signals while we clean up
+        signal.signal(signal.SIGINT, signal.SIG_IGN)
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)
         cleanup()
         sys.exit(0)
 
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
 
+    def watch_runner():
+        """If the cube runner dies (an uncaught crash, an OOM kill...), take the
+        whole service down with a non-zero exit so systemd restarts it. Without
+        this Flask would keep answering requests for a cube that never moves."""
+        cube_process.join()
+        if shutting_down.is_set():
+            return   # we terminated it ourselves
+        log.error("Cube runner exited with code %s - restarting service", cube_process.exitcode)
+        cleanup()
+        os._exit(1)
+
+    threading.Thread(target=watch_runner, daemon=True, name='runner-watchdog').start()
+
     try:
-        app.run(host='0.0.0.0', port=5000, debug=False, use_reloader=False)
+        app.run(host='0.0.0.0', port=5000, debug=False, use_reloader=False, threaded=True)
     except KeyboardInterrupt:
         cleanup()
-    except Exception as e:
-        print(f"Error: {e}")
+    except Exception:
+        log.exception("Web server stopped unexpectedly")
+        cleanup()
+        sys.exit(1)
