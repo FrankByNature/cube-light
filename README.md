@@ -29,6 +29,7 @@ Software for a home-built **5×5×5 RGB LED cube**: a Raspberry Pi web controlle
 | `effects.py` | Shared particle/spark bursts (fireworks, game explosions) |
 | `templates/index.html` | The single-page web UI |
 | `cube_MP_server.service` | systemd unit for running the server on boot |
+| `cube_controller_rfcomm@.service` | systemd unit that creates `/dev/rfcomm0` for the controller on boot |
 | `XYZ_test.py` | Hardware smoke test — lights the three axes |
 | `game_controller_bridge.py` | Bluetooth (SPP) controller → REST bridge |
 | `ESP32_controller/` | Firmware for the handheld controller |
@@ -131,6 +132,15 @@ python game_controller_bridge.py
 ```
 
 The bridge can also be started and stopped from the Games tab in the web UI. `python game_controller_bridge.py --test` shows decoded button presses without contacting the server.
+
+`rfcomm bind` doesn't survive a reboot. To create `/dev/rfcomm0` at every boot, install the unit with the controller's MAC address as the instance name (pair and trust the controller first):
+
+```bash
+sudo cp cube_controller_rfcomm@.service /etc/systemd/system/
+sudo systemctl enable --now cube_controller_rfcomm@<controller-MAC>
+```
+
+Binding doesn't connect, so the controller can be off at boot; the link comes up when the bridge opens the device. The device belongs to the `dialout` group, so if the bridge gets a permission error, run `sudo usermod -aG dialout cube` and reboot.
 
 ## How it works
 

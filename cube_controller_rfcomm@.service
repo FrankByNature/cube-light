@@ -1,0 +1,22 @@
+# Creates /dev/rfcomm0 for the Bluetooth controller at boot. The instance name
+# is the controller's MAC address:
+#   sudo systemctl enable --now cube_controller_rfcomm@AA:BB:CC:DD:EE:FF
+#
+# Binding does not connect, so the controller can be off at boot. The link comes
+# up when game_controller_bridge.py opens the device.
+
+[Unit]
+Description=RFCOMM serial device for cube controller %i
+After=bluetooth.service
+Wants=bluetooth.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# Clear any earlier bind (e.g. one made by hand), which would make bind fail
+ExecStartPre=-rfcomm release 0
+ExecStart=rfcomm bind 0 %i 1
+ExecStop=rfcomm release 0
+
+[Install]
+WantedBy=multi-user.target
