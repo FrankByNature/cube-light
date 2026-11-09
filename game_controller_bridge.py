@@ -50,6 +50,9 @@ Bluetooth setup (one time, on the Pi):
          sudo rfcomm bind 0 AA:BB:CC:DD:EE:FF 1     # creates /dev/rfcomm0
     3. Run this bridge (opening the device triggers the connection):
          python game_controller_bridge.py
+       It retries with growing gaps while the controller is off, and exits
+       once it has been unreachable for 1 minute (--give-up MINUTES, 0 =
+       never), so a forgotten bridge doesn't keep the radio busy all night.
 
 Test the controller WITHOUT the cube server running:
          python game_controller_bridge.py --test
@@ -78,8 +81,9 @@ except ImportError:
 
 # The server reads the tail of this script's log to show the link state in
 # the web UI (bridge_link_status in cube_MP_server.py), matching on the
-# phrases "Opening ", "Connected (", "Serial error" and "not found" - keep
-# those messages if you reword anything here.
+# phrases "Giving up", "not found", "Serial error", "link up", "< " (a button
+# arrived), "Connected (" and "Opening " - keep those messages if you reword
+# anything here.
 log = logging.getLogger('bridge')
 
 
@@ -111,6 +115,23 @@ VALID_GAMES = ('planes', 'snake', 'meteors')
 # and how long one poll may block the input loop.
 POLL_INTERVAL = 0.5
 POLL_TIMEOUT = 0.5
+
+# Reconnecting. Every attempt to open /dev/rfcomm0 makes the Pi's radio try to
+# reach the controller for about 5 s, and the Pi Zero 2 W uses one chip for
+# both Bluetooth and Wi-Fi. A bridge left retrying every few seconds for hours
+# with the controller switched off preceded the Pi dropping off the network,
+# so the bridge backs off between attempts and gives up (exits) once the
+# controller has been unreachable for GIVE_UP_AFTER seconds (--give-up).
+GIVE_UP_AFTER = 60
+RETRY_MIN = 3              # seconds before the first retry...
+RETRY_MAX = 30             # ...doubling up to this
+# Opening the rfcomm device succeeds at once even when the controller is off;
+# the failure only shows about 5 s later as a read error. So the link counts
+# as up once a session has lasted LINK_PROOF seconds or delivered a button.
+LINK_PROOF = 10
+# A write to a half-dead link can otherwise block forever (the bridge's log
+# froze on exactly that), so writes give up and count as a serial error.
+WRITE_TIMEOUT = 2
 
 
 class Bridge:
@@ -238,30 +259,50 @@ class Bridge:
             self._post('/planes/move', {'direction': direction})
 
 
-def reader_loop(port, baud, bridge):
-    """Open the serial port, feed decoded lines to the bridge, reconnect on drop."""
+def reader_loop(port, baud, bridge, give_up=GIVE_UP_AFTER,
+                clock=time.monotonic, sleep=time.sleep, open_port=None):
+    """Open the serial port, feed decoded lines to the bridge, reconnect on
+    drop. Returns once the controller has been unreachable for `give_up`
+    seconds (0 = retry forever). `clock`, `sleep` and `open_port` are there
+    for the tests."""
     if serial is None:
         log.error("pyserial not installed.  pip install pyserial")
         return
+    if open_port is None:
+        def open_port():
+            return serial.Serial(port, baud, timeout=0.1, write_timeout=WRITE_TIMEOUT)
 
     mode = "TEST MODE - server not contacted" if bridge.test \
         else f"forwarding to {bridge.server}"
 
+    last_seen = clock()   # the give-up clock starts when the bridge does
+    delay = RETRY_MIN
     while True:
         try:
             log.info("Opening %s ...", port)
-            with serial.Serial(port, baud, timeout=0.1) as ser:
+            with open_port() as ser:
+                # The device is open; whether the controller is really there
+                # only shows later (see LINK_PROOF).
                 log.info("Connected (%s).", mode)
                 log.info("Selected game: %s.  Waiting for input (Ctrl+C to quit) ...",
                          bridge.selected)
                 bridge.last_display = None   # force a display refresh on (re)connect
+                opened = clock()
+                link_up = False
                 next_poll = 0.0
                 buf = b''
                 while True:
+                    if not link_up and clock() - opened >= LINK_PROOF:
+                        link_up = True
+                        log.info("Controller link up.")
+                    if link_up:
+                        last_seen = clock()
+                        delay = RETRY_MIN
+
                     # Keep the controller's OLED current (score, high score).
-                    if time.monotonic() >= next_poll:
+                    if clock() >= next_poll:
                         bridge.update_display(ser)
-                        next_poll = time.monotonic() + POLL_INTERVAL
+                        next_poll = clock() + POLL_INTERVAL
 
                     # readline() returns a partial line on timeout, so buffer
                     # until the newline arrives.
@@ -272,15 +313,26 @@ def reader_loop(port, baud, bridge):
                     buf = b''
                     if not token:
                         continue
+                    if not link_up:
+                        link_up = True
+                        log.info("Controller link up.")
+                    last_seen = clock()
                     log.info("< %r", token)
                     bridge.handle(token)
                     next_poll = 0.0   # selection/start changes show up right away
-        except serial.SerialException as e:
-            log.warning("Serial error: %s.  Retrying in 3s ...", e)
-            time.sleep(3)
+        except serial.SerialException as e:   # includes a write timeout
+            log.warning("Serial error: %s.", e)
         except FileNotFoundError:
-            log.warning("%s not found - did you 'rfcomm bind'?  Retrying in 3s ...", port)
-            time.sleep(3)
+            log.warning("%s not found - did you 'rfcomm bind'?", port)
+
+        unreachable = clock() - last_seen
+        if give_up and unreachable >= give_up:
+            log.warning("Giving up: controller unreachable for %d min. Bridge stopped - "
+                        "start it again once the controller is on.", round(unreachable / 60))
+            return
+        log.info("Retrying in %ds ...", delay)
+        sleep(delay)
+        delay = min(delay * 2, RETRY_MAX)
 
 
 def main():
@@ -295,13 +347,16 @@ def main():
     ap.add_argument('--test', action='store_true',
                     help='monitor mode: print decoded inputs but never contact '
                          'the server (test the controller + Bluetooth on their own)')
+    ap.add_argument('--give-up', type=float, default=GIVE_UP_AFTER / 60, metavar='MINUTES',
+                    help='exit once the controller has been unreachable this long '
+                         '(default: %(default)g; 0 = keep retrying forever)')
     args = ap.parse_args()
 
     logging.basicConfig(level=logging.INFO, stream=sys.stdout,
                         format='%(asctime)s %(levelname)s %(message)s')
     bridge = Bridge(server=args.server, test=args.test)
     try:
-        reader_loop(args.port, args.baud, bridge)
+        reader_loop(args.port, args.baud, bridge, give_up=args.give_up * 60)
     except KeyboardInterrupt:
         log.info("Bye.")
 

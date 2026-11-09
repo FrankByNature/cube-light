@@ -15,6 +15,8 @@ import tempfile
 import traceback
 from queue import Empty
 
+import health
+
 log = logging.getLogger('cube')
 
 LOG_FORMAT = '%(asctime)s %(levelname)s %(name)s: %(message)s'
@@ -110,17 +112,33 @@ def bridge_link_status():
             lines = f.read().decode('utf-8', errors='replace').splitlines()
     except OSError:
         return ''
-    # The bridge logs with a timestamp/level prefix, so match anywhere in the line
+    # The bridge logs with a timestamp/level prefix, so match anywhere in the
+    # line. "Connected (" only means /dev/rfcomm0 opened - that succeeds even
+    # with the controller off - so it is the link-up line (or a button
+    # arriving) that says the controller is really there.
     for line in reversed(lines):
+        if 'Giving up' in line:
+            return BRIDGE_GAVE_UP
         if 'not found' in line:
             return 'No /dev/rfcomm0 - run rfcomm bind'
         if 'Serial error' in line:
             return 'Waiting for controller...'
-        if 'Connected (' in line:
+        if 'link up' in line or ' INFO < ' in line:
             return 'Controller connected'
-        if 'Opening ' in line:
+        if 'Connected (' in line or 'Opening ' in line:
             return 'Connecting...'
     return ''
+
+# Shown after the bridge exits on its own because the controller stayed
+# unreachable (game_controller_bridge.GIVE_UP_AFTER)
+BRIDGE_GAVE_UP = 'Stopped - controller not found'
+
+def bridge_state():
+    running = bridge_running()
+    link = bridge_link_status()
+    if not running and link != BRIDGE_GAVE_UP:
+        link = ''   # stopped by hand: the old log tail no longer applies
+    return {'running': running, 'link': link}
 
 # Set spawn context
 if __name__ == '__main__':
@@ -1526,10 +1544,6 @@ def create_flask_app(command_queue, brightness_value, frame_shared,
                         'highscore': meteors_highscore.value})
 
     # Bluetooth controller bridge
-    def bridge_state():
-        running = bridge_running()
-        return {'running': running, 'link': bridge_link_status() if running else ''}
-
     @app.route('/bridge/start', methods=['POST'])
     def start_bridge_route():
         try:
@@ -1586,6 +1600,32 @@ if __name__ == '__main__':
         meteors_score, meteors_game_over, meteors_highscore))
     cube_process.start()
 
+    # One line every 30 s to health.log, for working out what happened if the
+    # Pi drops off the network (see health.py). CUBE_HEALTH_LOG=0 turns it off.
+    def health_extra():
+        info = {'server_mem': health.process_rss_mb(os.getpid()),
+                'runner': 'up' if cube_process.is_alive() else 'DEAD',
+                'runner_mem': health.process_rss_mb(cube_process.pid)}
+        proc = _bridge_proc
+        if proc is not None and proc.poll() is None:
+            info['bridge'] = 'on'
+            info['bridge_mem'] = health.process_rss_mb(proc.pid)
+            try:
+                # The bridge logs every reconnect attempt, so a log that stops
+                # growing while the controller is off means it is stuck.
+                info['bridge_log_age'] = f'{time.time() - os.path.getmtime(BRIDGE_LOG):.0f}s'
+            except OSError:
+                pass
+        else:
+            info['bridge'] = 'off'
+        return {k: (f'{v}MB' if k.endswith('_mem') and v is not None else v)
+                for k, v in info.items()}
+
+    health_logger = None
+    if os.environ.get('CUBE_HEALTH_LOG', '1') != '0':
+        health_logger = health.HealthLogger(extra=health_extra)
+        health_logger.start()
+
     app = create_flask_app(command_queue, brightness_value, frame_shared,
                            planes_score, planes_game_over, planes_highscore,
                            snake_score, snake_game_over, snake_won, snake_highscore,
@@ -1611,6 +1651,8 @@ if __name__ == '__main__':
             send_to_cube(leds, 1.0)
         except Exception:
             pass
+        if health_logger is not None:
+            health_logger.stop()   # a STOP line marks a clean shutdown
         log.info("Server stopped")
 
     def signal_handler(sig, frame):

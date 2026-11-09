@@ -913,7 +913,7 @@
             btn.textContent = bridgeRunning ? '⏹️ Stop Controller' : '▶️ Start Controller';
             btn.className = bridgeRunning ? 'game-stop-btn' : 'game-start-btn';
             document.getElementById('bridgeStatus').textContent =
-                bridgeRunning ? (state.link || 'Running') : 'Stopped';
+                state.link || (bridgeRunning ? 'Running' : 'Stopped');
         }
 
         function refreshBridge() {

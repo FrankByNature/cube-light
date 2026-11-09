@@ -4,4 +4,6 @@ __pycache__/
 # Runtime state written by the server
 highscores.json
 controller_bridge.log
+health.log
+health.log.1
 .pytest_cache/

@@ -27,6 +27,7 @@ Software for a home-built **5×5×5 RGB LED cube**: a Raspberry Pi web controlle
 | `cube_io.py` | I2C output layer: bus detection, the two cubes' wiring maps, simulated bus |
 | `patterns.py` | All patterns and their live-tunable state |
 | `effects.py` | Shared particle/spark bursts (fireworks, game explosions) |
+| `health.py` | Writes `health.log`: a system health sample every 30 s, for diagnosing outages |
 | `templates/index.html` | The single-page web UI |
 | `cube_MP_server.service` | systemd unit for running the server on boot |
 | `cube_controller_rfcomm@.service` | systemd unit that creates `/dev/rfcomm0` for the controller on boot |
@@ -96,6 +97,32 @@ cube ALL=(root) NOPASSWD: /sbin/shutdown
 
 **Smoke test:** `python XYZ_test.py` lights one LED along each axis — handy for checking wiring and orientation.
 
+### If the Pi drops off the network
+
+**Health log.** While the server runs it appends a line to `health.log` (next to the server, so it is readable over the share) every 30 seconds: load, free memory, CPU temperature, the firmware's under-voltage/throttling flags, the Wi-Fi link and signal, whether the router answers a ping (`gw=`), Bluetooth, and the server, runner and bridge processes. Each line is forced to disk, so the last one survives a hang or power cut. After an outage:
+
+- lines carry on through it with `gw=fail` or `wlan=down`: the Pi was running and only the network was lost;
+- lines just stop: the whole Pi hung or lost power, at about the last line;
+- `throttled=` other than `0x0`: under-voltage or throttling since boot;
+- a `START` with no `STOP` before it: the previous run did not shut down cleanly.
+
+Changes in those values are also logged to the journal as warnings. Set `CUBE_HEALTH_LOG=0` to turn the health log off.
+
+**Keep the journal across reboots.** If `journalctl --list-boots` shows only one boot, the journal is lost on every reboot, including the logs from just before a crash. Make it persistent, and have it reach the SD card every 15 s instead of every 5 minutes:
+
+```bash
+sudo mkdir -p /etc/systemd/journald.conf.d
+printf '[Journal]\nStorage=persistent\nSyncIntervalSec=15s\n' | sudo tee /etc/systemd/journald.conf.d/cube.conf
+sudo systemctl restart systemd-journald
+```
+
+Then, after the next outage and reboot, look at the end of the previous boot:
+
+```bash
+journalctl -b -1 -n 80 --no-pager
+journalctl -b -1 -k --no-pager | grep -iE "brcmf|bluetooth|hci|rfcomm|voltage|oom|mmc"
+```
+
 ### Security
 
 The server has no login: anyone who can reach port 5000 can control the cube, which is fine on a home network and is why it should not be exposed to the internet. The shutdown endpoint additionally requires a custom `X-Cube-Confirm: shutdown` header, which the UI sends. That header is what stops a malicious web page open in a browser on your network from shutting the Pi down: browsers will not add custom headers to a cross-origin request without a CORS preflight, and this server does not answer preflights (it deliberately has no CORS support; the UI is same-origin and the controller bridge is not a browser).
@@ -132,6 +159,8 @@ python game_controller_bridge.py
 ```
 
 The bridge can also be started and stopped from the Games tab in the web UI. `python game_controller_bridge.py --test` shows decoded button presses without contacting the server.
+
+If the controller is off or out of range, the bridge retries with growing gaps (3 s up to 30 s) and **stops itself after 1 minute** without reaching it, so switch the controller on before (or within a minute of) starting the bridge; the Games tab then shows "Stopped - controller not found". Start it again once the controller is on. Change the limit with `--give-up MINUTES` (`0` retries forever). Each attempt keeps the Pi's radio busy, and the Pi Zero 2 W shares that radio between Bluetooth and Wi-Fi, so a bridge left retrying all night is best avoided.
 
 `rfcomm bind` doesn't survive a reboot. To create `/dev/rfcomm0` at every boot, install the unit with the controller's MAC address as the instance name (pair and trust the controller first):
 
